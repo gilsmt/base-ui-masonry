@@ -501,6 +501,15 @@ interface ItemRegistrationCache {
     nodes: Map<number, ItemElement>;
 }
 
+interface CachedItemElement {
+    child: React.ReactElement<MasonryChildProps>;
+    cloned: React.ReactElement<MasonryChildProps>;
+    columnWidth: number;
+    inert: boolean;
+    isScrolling: boolean;
+    item: PositionerItem | null;
+}
+
 interface PendingItemMeasurement {
     height?: number;
     node: HTMLElement;
@@ -712,6 +721,7 @@ export function MasonryRoot({
         nodes: new Map(),
     }));
     const pendingMeasurementsRef = React.useRef(new Map<number, PendingItemMeasurement>());
+    const elementCacheRef = useRefWithInit<Map<number, CachedItemElement>>(() => new Map());
     const committedItemKeysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
 
     const positioner = positionerRef.current;
@@ -814,6 +824,7 @@ export function MasonryRoot({
         itemRegistrationCacheRef.current.callbacks.clear();
         itemRegistrationCacheRef.current.nodes.clear();
         pendingMeasurementsRef.current.clear();
+        elementCacheRef.current.clear();
     });
 
     useIsoLayoutEffect(() => {
@@ -874,36 +885,62 @@ export function MasonryRoot({
     };
 
     const positionedChildren: React.ReactElement[] = [];
+    const appendedIndices: number[] = [];
 
     const appendPositionedChild = (
         index: number,
-        itemStyle: React.CSSProperties,
+        item: PositionerItem | null,
+        buildStyle: () => React.CSSProperties,
         extraProps?: Pick<MasonryChildProps, "inert">,
     ) => {
         const child = validChildren[index];
         if (!child) {
             return;
         }
-        positionedChildren.push(
-            React.cloneElement(child, {
+
+        const elementCache = elementCacheRef.current;
+        const isScrollingStyle = item !== null && isScrolling;
+        const inert = extraProps?.inert === true;
+        const cached = elementCache.get(index);
+        if (
+            !cached ||
+            cached.child !== child ||
+            cached.item !== item ||
+            cached.isScrolling !== isScrollingStyle ||
+            cached.columnWidth !== positioner.columnWidth ||
+            cached.inert !== inert
+        ) {
+            const cloned = React.cloneElement(child, {
                 [MasonryDataAttributes.index]: index,
                 ref: onItemRegister(index, child.props.ref),
                 style: {
                     ...child.props.style,
-                    ...itemStyle,
+                    ...buildStyle(),
                 },
                 ...extraProps,
-            }),
-        );
+            });
+            elementCache.set(index, {
+                child,
+                cloned,
+                columnWidth: positioner.columnWidth,
+                inert,
+                isScrolling: isScrollingStyle,
+                item,
+            });
+            positionedChildren.push(cloned);
+        } else {
+            positionedChildren.push(cached.cloned);
+        }
+        appendedIndices.push(index);
     };
 
     positioner.range(rangeStart, rangeEnd, (position) => {
-        appendPositionedChild(position.index, {
+        appendPositionedChild(position.index, position, () => ({
             ...visibleItemStyle,
             containIntrinsicHeight: `auto ${Math.max(1, Math.ceil(position.height))}px`,
             left: position.left,
             top: position.top,
-        });
+        }));
     });
 
     if (isLayoutOutdated) {
@@ -921,7 +958,22 @@ export function MasonryRoot({
         if (batchSize > 0) {
             const end = Math.min(itemCount, firstUnmeasuredIndex + batchSize);
             for (let index = firstUnmeasuredIndex; index < end; index += 1) {
-                appendPositionedChild(index, hiddenItemStyle, { inert: true });
+                appendPositionedChild(index, null, () => hiddenItemStyle, { inert: true });
+            }
+        }
+    }
+
+    if (elementCacheRef.current.size > positionedChildren.length * 2 + 32) {
+        const retained = new Set(appendedIndices);
+        for (const cacheKey of elementCacheRef.current.keys()) {
+            if (!retained.has(cacheKey)) {
+                elementCacheRef.current.delete(cacheKey);
+            }
+        }
+        const itemForks = itemRegistrationCacheRef.current.callbacks;
+        for (const forkKey of itemForks.keys()) {
+            if (!retained.has(forkKey)) {
+                itemForks.delete(forkKey);
             }
         }
     }
