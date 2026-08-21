@@ -11,6 +11,7 @@ import { useIsoLayoutEffect } from "@base-ui/utils/useIsoLayoutEffect";
 import { useRefWithInit } from "@base-ui/utils/useRefWithInit";
 import { useStableCallback } from "@base-ui/utils/useStableCallback";
 import { useTimeout } from "@base-ui/utils/useTimeout";
+import { flushSync } from "react-dom";
 import * as React from "react";
 
 const DEFAULT_COLUMN_WIDTH = 200;
@@ -390,15 +391,17 @@ function useMeasurements(containerRef: React.RefObject<RootElement | null>) {
               }
             : null;
 
-        setMeasurements((previous) => {
-            const next: Measurements = {
-                containerOffset: layoutFields?.containerOffset ?? previous.containerOffset,
-                containerWidth: layoutFields?.containerWidth ?? previous.containerWidth,
-                isScrolling,
-                scrollY,
-                windowHeight: layoutFields?.windowHeight ?? previous.windowHeight,
-            };
-            return areMeasurementsEqual(previous, next) ? previous : next;
+        flushSync(() => {
+            setMeasurements((previous) => {
+                const next: Measurements = {
+                    containerOffset: layoutFields?.containerOffset ?? previous.containerOffset,
+                    containerWidth: layoutFields?.containerWidth ?? previous.containerWidth,
+                    isScrolling,
+                    scrollY,
+                    windowHeight: layoutFields?.windowHeight ?? previous.windowHeight,
+                };
+                return areMeasurementsEqual(previous, next) ? previous : next;
+            });
         });
     });
 
@@ -724,7 +727,9 @@ export function MasonryRoot({
         );
 
         if (didChange) {
-            rerender();
+            flushSync(() => {
+                rerender();
+            });
         }
     });
 
