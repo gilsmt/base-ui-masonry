@@ -23,7 +23,7 @@ const DEFAULT_OVERSCAN = 2;
 
 // content-visibility's paint containment can clip MasonryItem, so the overflow
 // clip edge can be widened by this margin
-const ITEM_OVERFLOW_CLIP_MARGIN = "0.5rem";
+const ITEM_OVERFLOW_CLIP_MARGIN = "0px";
 
 // 100 ms without scroll events ≈ scroll end
 // https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollend_event
