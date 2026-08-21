@@ -29,14 +29,12 @@ const ITEM_OVERFLOW_CLIP_MARGIN = "0px";
 // https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollend_event
 const SCROLL_TIMEOUT_MS = 100;
 
-// Range queries visit every column, so keep their logarithmic work bounded
+// Range queries scan every column, so the column count is capped to bound
+// their linear cost
 const INTERNAL_MAX_COLUMN_COUNT = 16;
 
 // Max excess of the preferred column over the shortest column, in item heights
 const MAX_COLUMN_SKEW_RATIO = 2.5;
-
-// Keeps hidden measurement items below all content so they never paint
-const HIDDEN_ITEM_Z_INDEX = -1000;
 
 const MasonryDataAttributes = {
     /**
@@ -120,7 +118,6 @@ function findLowerBound(
 }
 
 function findFirstOverlappingItem(items: readonly PositionerItem[], low: number): number {
-    // Nonnegative heights and gaps keep item tops sorted within each column
     const start = findLowerBound(items, (item) => item.top >= low);
     const previousItem = items[start - 1];
     return previousItem !== undefined && previousItem.top + previousItem.height >= low
@@ -178,7 +175,13 @@ function buildPositioner({
 
             const remainingItemCount = Math.max(0, itemCount - items.length);
             const remainingRowCount = Math.ceil(remainingItemCount / resolvedColumnCount);
-            return tallestColumn + remainingRowCount * (defaultItemHeight + normalizedRowGap);
+            const leadingGap = items.length > 0 && remainingRowCount > 0 ? normalizedRowGap : 0;
+            return (
+                tallestColumn +
+                leadingGap +
+                remainingRowCount * defaultItemHeight +
+                Math.max(0, remainingRowCount - 1) * normalizedRowGap
+            );
         },
         get: (index: number) => items[index],
         range: (low: number, high: number, visitItem: (item: PositionerItem) => void) => {
@@ -191,12 +194,6 @@ function buildPositioner({
                     }
                     visitItem(item);
                 }
-            }
-        },
-        reset: () => {
-            items.length = 0;
-            for (const columnItemsList of columnItems) {
-                columnItemsList.length = 0;
             }
         },
         set: (height: number) => {
@@ -236,6 +233,9 @@ function buildPositioner({
         },
         shortestColumn: () => Math.min(...getColumnHeights()),
         size: () => items.length,
+        // Column assignment is frozen once an item is placed: height changes
+        // reflow only the item's own column and never rebalance items across
+        // columns, since reassigning them would reshuffle the visible layout
         update: (updates: readonly PositionerUpdate[]) => {
             const nextHeights = new Map<number, number>();
             const firstChangedIndexByColumn = new Map<number, number>();
@@ -298,17 +298,6 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
         nextPositioner.set(item.height);
     }
     return nextPositioner;
-}
-
-function arePositionerOptionsEqual(first: PositionerOptions, second: PositionerOptions) {
-    return (
-        first.columnCount === second.columnCount &&
-        first.horizontalGap === second.horizontalGap &&
-        first.columnWidth === second.columnWidth &&
-        first.containerWidth === second.containerWidth &&
-        first.maxColumnCount === second.maxColumnCount &&
-        first.verticalGap === second.verticalGap
-    );
 }
 
 function createResizeObserver(
@@ -497,8 +486,15 @@ interface MasonryChildProps extends React.ComponentProps<"div"> {
     [MasonryDataAttributes.index]?: number;
 }
 
+interface ItemRefFork {
+    callback: React.RefCallback<ItemElement>;
+    childRef: React.Ref<ItemElement> | undefined;
+    detach: (() => void) | null;
+    register: React.RefCallback<ItemElement>;
+}
+
 interface ItemRegistrationCache {
-    callbacks: Map<number, React.RefCallback<ItemElement>>;
+    callbacks: Map<number, ItemRefFork>;
     nodes: Map<number, ItemElement>;
 }
 
@@ -517,6 +513,63 @@ function isMasonryChildElement(
     return React.isValidElement(node);
 }
 
+function createItemRefFork(register: React.RefCallback<ItemElement>): ItemRefFork {
+    const fork: ItemRefFork = {
+        callback: (node) => {
+            const previousDetach = fork.detach;
+            fork.detach = null;
+            previousDetach?.();
+
+            if (node === null) {
+                return;
+            }
+
+            const attachedRefs: readonly (React.Ref<ItemElement> | undefined)[] = [
+                fork.register,
+                fork.childRef,
+            ];
+            const cleanups: Array<(() => void) | null> = attachedRefs.map(() => null);
+
+            for (const [refIndex, ref] of attachedRefs.entries()) {
+                if (!ref) {
+                    continue;
+                }
+                if (typeof ref === "function") {
+                    const cleanup = ref(node);
+                    if (typeof cleanup === "function") {
+                        cleanups[refIndex] = cleanup;
+                    }
+                } else {
+                    ref.current = node;
+                }
+            }
+
+            fork.detach = () => {
+                for (const [refIndex, ref] of attachedRefs.entries()) {
+                    if (!ref) {
+                        continue;
+                    }
+                    if (typeof ref === "function") {
+                        const cleanup = cleanups[refIndex];
+                        if (typeof cleanup === "function") {
+                            cleanup();
+                        } else {
+                            // Legacy ref with no attach-time cleanup: detach with null
+                            ref(null);
+                        }
+                    } else {
+                        ref.current = null;
+                    }
+                }
+            };
+        },
+        childRef: undefined,
+        detach: null,
+        register,
+    };
+    return fork;
+}
+
 function commitPendingMeasurements(
     positioner: Positioner,
     registeredNodes: ReadonlyMap<number, ItemElement>,
@@ -526,8 +579,6 @@ function commitPendingMeasurements(
     const updates: PositionerUpdate[] = [];
     let didChange = false;
 
-    // Newly registered nodes are contiguous by index; a gap simply ends the
-    // batch and later items are picked up once their predecessors register
     for (let index = measuredItemCount; registeredNodes.has(index); index += 1) {
         const node = registeredNodes.get(index);
         if (!node) {
@@ -621,7 +672,7 @@ interface MasonryRootProps extends useRender.ComponentProps<"div"> {
 export function MasonryRoot({
     columnWidth = DEFAULT_COLUMN_WIDTH,
     columnCount,
-    maxColumnCount,
+    maxColumnCount: maxColumnCountProp,
     gap = DEFAULT_GAP,
     itemHeight = DEFAULT_ITEM_HEIGHT,
     overscan = DEFAULT_OVERSCAN,
@@ -635,19 +686,19 @@ export function MasonryRoot({
 
     const { horizontalGap, verticalGap } = parseGapDirectionalValues(gap);
     const normalizedItemHeight = parseFiniteNumber(itemHeight, 1, DEFAULT_ITEM_HEIGHT);
-    const normalizedMaxColumnCount = parsePositiveFiniteNumber(
-        maxColumnCount,
-        Number.POSITIVE_INFINITY,
-    );
+    const maxColumnCount = parsePositiveFiniteNumber(maxColumnCountProp, Number.POSITIVE_INFINITY);
 
-    const latestOptions: PositionerOptions = {
-        columnCount,
-        columnWidth,
-        containerWidth,
-        horizontalGap,
-        maxColumnCount: normalizedMaxColumnCount,
-        verticalGap,
-    };
+    const latestOptions: PositionerOptions = React.useMemo(
+        () => ({
+            columnCount,
+            columnWidth,
+            containerWidth,
+            horizontalGap,
+            maxColumnCount,
+            verticalGap,
+        }),
+        [columnCount, columnWidth, containerWidth, horizontalGap, maxColumnCount, verticalGap],
+    );
 
     const positionerRef = useRefWithInit(() => buildPositioner(latestOptions));
     const committedOptionsRef = useRefWithInit(() => latestOptions);
@@ -658,7 +709,6 @@ export function MasonryRoot({
         nodes: new Map(),
     }));
     const pendingMeasurementsRef = React.useRef(new Map<number, PendingItemMeasurement>());
-    const shouldRerenderRef = React.useRef(false);
     const committedItemKeysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
 
     const positioner = positionerRef.current;
@@ -673,16 +723,12 @@ export function MasonryRoot({
             pendingMeasurements,
         );
 
-        const shouldRerender = shouldRerenderRef.current;
-        shouldRerenderRef.current = false;
-
-        if (didChange || shouldRerender) {
+        if (didChange) {
             rerender();
         }
     });
 
-    const scheduleMeasurementsChanged = useStableCallback((shouldRerender = false) => {
-        shouldRerenderRef.current ||= shouldRerender;
+    const scheduleMeasurementsChanged = useStableCallback(() => {
         animationFrame.request(commitMeasurements);
     });
 
@@ -744,21 +790,22 @@ export function MasonryRoot({
         queueItemMeasurement(index, node);
     });
 
-    const onItemRegister = (index: number) => {
-        const existingCallback = itemRegistrationCacheRef.current.callbacks.get(index);
-        if (existingCallback) {
-            return existingCallback;
+    const onItemRegister = (index: number, childRef: React.Ref<ItemElement> | undefined) => {
+        const registrationCache = itemRegistrationCacheRef.current;
+        const existingFork = registrationCache.callbacks.get(index);
+        if (!existingFork || existingFork.childRef !== childRef) {
+            // A changed child ref needs a fresh callback identity so React
+            // detaches the previous targets, matching native ref-swap semantics
+            const fork = createItemRefFork((node) => registerItemNode(index, node));
+            fork.childRef = childRef;
+            registrationCache.callbacks.set(index, fork);
+            return fork.callback;
         }
-        const nextCallback: React.RefCallback<ItemElement> = (node) => {
-            registerItemNode(index, node);
-        };
-        itemRegistrationCacheRef.current.callbacks.set(index, nextCallback);
-        return nextCallback;
+        return existingFork.callback;
     };
 
-    const resetPositioner = useStableCallback(() => {
+    const clearItemRegistrations = useStableCallback(() => {
         resizeObserver?.disconnect();
-        positionerRef.current.reset();
         itemRegistrationCacheRef.current.callbacks.clear();
         itemRegistrationCacheRef.current.nodes.clear();
         pendingMeasurementsRef.current.clear();
@@ -769,28 +816,23 @@ export function MasonryRoot({
             committedItemKeysRef.current !== null &&
             !areItemKeysPrefixEqual(committedItemKeysRef.current, currentItemKeys);
 
-        const shouldRebuildPositioner = !arePositionerOptionsEqual(
-            committedOptionsRef.current,
-            latestOptions,
-        );
+        const shouldRebuildPositioner = committedOptionsRef.current !== latestOptions;
 
         committedItemKeysRef.current = currentItemKeys;
         committedOptionsRef.current = latestOptions;
 
-        if (shouldResetPositioner) {
-            resetPositioner();
-        }
+        if (shouldResetPositioner || shouldRebuildPositioner) {
+            if (shouldResetPositioner) {
+                clearItemRegistrations();
+            }
 
-        if (shouldRebuildPositioner) {
             positionerRef.current = shouldResetPositioner
                 ? buildPositioner(latestOptions)
                 : rebuildPositioner(positionerRef.current, latestOptions);
-        }
 
-        if (shouldResetPositioner || shouldRebuildPositioner) {
-            scheduleMeasurementsChanged(true);
+            rerender();
         }
-    }, [currentItemKeys, latestOptions, resetPositioner, scheduleMeasurementsChanged]);
+    }, [clearItemRegistrations, currentItemKeys, latestOptions, rerender]);
 
     const firstUnmeasuredIndex = positioner.size();
     const shortestColumnSize = positioner.shortestColumn();
@@ -798,8 +840,10 @@ export function MasonryRoot({
     const itemCount = validChildren.length;
     const normalizedOverscan = parseFiniteNumber(overscan, 0, DEFAULT_OVERSCAN);
     const overscanPixels = windowHeight * normalizedOverscan;
+    // The visible window is always included; overscan extends it by half a
+    // margin above and below so `overscan: 0` still renders the viewport
     const rangeStart = Math.max(0, scrollTop - overscanPixels / 2);
-    const rangeEnd = scrollTop + overscanPixels;
+    const rangeEnd = scrollTop + windowHeight + overscanPixels / 2;
 
     const isLayoutOutdated =
         (firstUnmeasuredIndex === 0 || shortestColumnSize < rangeEnd) &&
@@ -810,18 +854,18 @@ export function MasonryRoot({
         overflowClipMargin: ITEM_OVERFLOW_CLIP_MARGIN,
         position: "absolute",
         transform: isScrolling ? "translateZ(0)" : undefined,
-        visibility: "visible",
         width: positioner.columnWidth,
         willChange: isScrolling ? "transform" : undefined,
         writingMode: "horizontal-tb",
     };
 
     const hiddenItemStyle: React.CSSProperties = {
+        left: 0,
         position: "absolute",
+        top: 0,
         visibility: "hidden",
         width: positioner.columnWidth,
         writingMode: "horizontal-tb",
-        zIndex: HIDDEN_ITEM_Z_INDEX,
     };
 
     const positionedChildren: React.ReactElement[] = [];
@@ -838,7 +882,7 @@ export function MasonryRoot({
         positionedChildren.push(
             React.cloneElement(child, {
                 [MasonryDataAttributes.index]: index,
-                ref: onItemRegister(index),
+                ref: onItemRegister(index, child.props.ref),
                 style: {
                     ...child.props.style,
                     ...itemStyle,
@@ -863,7 +907,7 @@ export function MasonryRoot({
             Math.max(
                 firstUnmeasuredIndex === 0 ? positioner.columnCount : 0,
                 Math.ceil(
-                    ((scrollTop + overscanPixels - shortestColumnSize) / normalizedItemHeight) *
+                    ((rangeEnd - shortestColumnSize) / normalizedItemHeight) *
                         positioner.columnCount,
                 ),
             ),
@@ -882,7 +926,6 @@ export function MasonryRoot({
     const style: React.CSSProperties = {
         ...styleProp,
         height,
-        maxHeight: height,
         maxWidth: "100%",
         position: "relative",
         width: "100%",

@@ -67,7 +67,7 @@ For reference, the raw source file is 32.37 kB (32,373 B) / 7.47 kB gzipped (7,4
 
 - Children must be keyed elements (`key={item.id}`). Non-element children (strings, numbers, fragments) are ignored. Items are kept in DOM order, so tab order and keyboard navigation follow the source order.
 - **Scrolling** follows the **window** scroll position (`window.scrollY`), not an inner scrollable container. If your layout scrolls inside an `overflow: auto` element, hook it up yourself or place the masonry inside the page scroller.
-- `MasonryRoot` **manages item refs** for measurement and virtualization; refs you pass to items (or to elements rendered inside a slot) are replaced and never receive the node. Forward refs if you need to reach an item's DOM node.
+- `MasonryRoot` **manages item refs** for measurement and virtualization. Refs you pass to items are merged with the internal registration ref, so they still receive the item's DOM node.
 - `columnWidth` is a _preferred_ width used to derive the column count. Items will always try to stretch to fill their (equal-width) columns for consistency.
 
 ## Contributing
