@@ -1,62 +1,72 @@
 # base-ui-masonry
 
-A responsive, highly optimized, justified masonry layout component with support for variable column widths and virtualization built for being used alongside [BaseUI](https://base-ui.com/) in React projects.
+A responsive, highly optimized, unstyled masonry UI layout component. With virtualization, built for being used alongside [BaseUI](https://base-ui.com) in React 19 projects.
 
-Very recommended to use with `babel-plugin-react-compiler`.
+This project is meant to be vendored, not treated as a fixed npm dependency. Copy the file into your repository, read it, and change it to match your team's standards and goals.
 
-## Why
-
-CSS `column`-based masonry layouts reorder items vertically, breaking logical tab order and keyboard navigation. True masonry requires absolute positioning with explicit top/left coordinates, but computing those layouts efficiently becomes difficult as the number of items grows.
-
-Scroll performance and layout stability introduce further challenges. As items resize or new ones are measured, the layout must update incrementally without causing visible jumps or expensive recalculations. Responsive column counts, variable-width items, and justified row packing each add another layer of complexity.
-
-base-ui-masonry provides a low-level, virtualized masonry and justified-layout engine that preserves DOM order, uses interval-tree spatial indexing for O(log n) scroll queries, integrates with BaseUI's resize observation and animation frame primitives, and follows BaseUI's component practices for smooth, accessible, performant layouts.
-
-## 1. Installation
+## Usage
 
 ### Install dependencies
 
 ```bash
-npm install justified-layout @base-ui/react @base-ui/utils
+npm install @base-ui/react @base-ui/utils
 ```
 
 ```bash
-pnpm add justified-layout @base-ui/react @base-ui/utils
+pnpm add @base-ui/react @base-ui/utils
 ```
 
 ```bash
-bun add justified-layout @base-ui/react @base-ui/utils
-```
-
-```bash
-yarn add justified-layout @base-ui/react @base-ui/utils
+bun add @base-ui/react @base-ui/utils
 ```
 
 ### Copy and paste the following code into your project
 
 [masonry.tsx](./src/masonry.tsx)
 
-and [justified-layout.d.ts](./justified-layout.d.ts) if you run into type issues.
+## Anatomy
 
-## 2. Anatomy
-
-Import the parts, and compose them together.
+Import the parts, and assemble them together.
 
 ```tsx
-import {
-  Masonry,
-  MasonryItem,
-} from "@/components/ui/masonry";
+import { MasonryRoot, MasonryItem } from "@/components/ui/masonry";
 
 return (
-  <Masonry columnCount={columnCount} gap={4}>
-    <MasonryItem />
-  </Masonry>
-)
+    <MasonryRoot columnCount={6} gap={4}>
+        {items.map((item) => (
+            <MasonryItem key={item.id}>
+                <Card>...</Card>
+            </MasonryItem>
+        ))}
+    </MasonryRoot>
+);
 ```
 
-Inspired by [DiceUI](https://www.diceui.com/docs/components/base/masonry) and heavily modified.
+Use the render prop to compose a part with your own React components.
+
+For example, MasonryItem renders a <div> by default. The code snippet below shows how to use a custom button instead.
+
+```tsx
+<MasonryItem key={item.id} render={<MyButton size="md" />}>
+    ...
+</MasonryItem>
+```
+
+The custom component must forward the ref, and spread all the received props on its underlying DOM node. [Learn more](https://base-ui.com/react/handbook/composition)
+
+## Notes
+
+In order to achieve optimal performance these tradeoffs have been made:
+
+- **Scrolling** follows the **window** scroll position (`window.scrollY`), not an inner scrollable container. If your layout scrolls inside an `overflow: auto` element, hook it up yourself or place the masonry inside the page scroller.
+- `MasonryRoot` **manages item refs** for measurement and virtualization; refs you pass to items (or to elements rendered inside a slot) are replaced and never receive the node. Forward refs if you need to reach an item's DOM node.
+- `columnWidth` is a _preferred_ width used to derive the column count — items always stretch to fill their (equal-width) columns.
+- Children must be keyed elements. Non-element children (strings, numbers, fragments) are ignored. Items are kept in DOM order, so tab order and keyboard navigation follow the source order.
+
+## Contributing
+
+Open to pull requests & suggestions.
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE file](LICENSE) for details.
