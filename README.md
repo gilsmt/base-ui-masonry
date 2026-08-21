@@ -6,7 +6,7 @@ This project is meant to be vendored, not treated as a fixed npm dependency. Cop
 
 ## Usage
 
-### Install dependencies
+### 1. Install dependencies
 
 ```bash
 npm install @base-ui/react @base-ui/utils
@@ -20,7 +20,7 @@ pnpm add @base-ui/react @base-ui/utils
 bun add @base-ui/react @base-ui/utils
 ```
 
-### Copy and paste the following code into your project
+### 2. Copy and paste the following code into your project
 
 [masonry.tsx](./src/masonry.tsx)
 
