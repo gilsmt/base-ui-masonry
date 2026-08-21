@@ -1,6 +1,8 @@
-# dependencies (bun install)
-node_modules
+.DS_Store
 
+# dependencies
+node_modules
+bun.lock
 # output
 out
 dist
@@ -13,6 +15,7 @@ coverage
 # logs
 logs
 _.log
+*.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files
@@ -22,15 +25,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.production.local
 .env.local
 
-# caches
+# Local tooling
 .eslintcache
 .cache
 *.tsbuildinfo
-
-# IntelliJ based IDEs
-.idea
-
-# Finder (MacOS) folder config
-.DS_Store
-
 .agents
