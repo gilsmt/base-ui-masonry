@@ -34,22 +34,22 @@ const MAX_COLUMN_SKEW_RATIO = 2.5;
 // Caches are pruned only past twice the rendered window plus this slack
 const CACHE_PRUNE_SLACK = 32;
 
-enum MasonryDataAttributes {
+const MasonryDataAttributes = {
     /**
      * Indicates the index of the masonry item. Always present.
      * @type {number}
      */
-    index = "data-index",
+    index: "data-index",
     /**
      * Identifies the masonry component slot. Always present.
      * @type {string}
      */
-    slot = "data-slot",
-}
+    slot: "data-slot",
+} as const;
 
-/* ---------------------------------- Shared utils --------------------------------- */
+/* ------------------------------------ Shared utils ----------------------------------- */
 
-function parseGapDirectionalValues(gap?: number | { horizontal: number; vertical: number }) {
+function parseGapDirectionalValues(gap: number | { horizontal: number; vertical: number }) {
     if (gap && typeof gap === "object") {
         return {
             horizontalGap: gap.horizontal,
@@ -68,10 +68,10 @@ function parsePositiveFiniteNumber(value: number | undefined, fallback: number) 
 }
 
 function parseMeasuredItemHeight(value: number | undefined) {
-    return Math.max(parsePositiveFiniteNumber(value, 0), 1);
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
 }
 
-/* ---------------------------- Positioner --------------------------- */
+/* ------------------------------------- Positioner ------------------------------------ */
 
 interface PositionerItem {
     readonly columnIndex: number;
@@ -92,7 +92,7 @@ interface PositionerOptions {
     columnWidth?: number;
     containerWidth: number;
     horizontalGap?: number;
-    maxColumnCount: number;
+    maxColumnCount?: number;
     verticalGap?: number;
 }
 
@@ -112,12 +112,6 @@ function getColumnItems(columns: PositionerItem[][], columnIndex: number): Posit
     return items;
 }
 
-function getColumnHeight(columns: PositionerItem[][], columnIndex: number): number {
-    const items = getColumnItems(columns, columnIndex);
-    const lastItem = items.at(-1);
-    return lastItem ? lastItem.top + lastItem.height : 0;
-}
-
 function findShortestColumn(columnHeights: readonly number[]): { height: number; index: number } {
     let shortestIndex = 0;
     let shortestHeight = Number.POSITIVE_INFINITY;
@@ -130,7 +124,7 @@ function findShortestColumn(columnHeights: readonly number[]): { height: number;
     return { height: shortestHeight, index: shortestIndex };
 }
 
-function findLowerBound(
+function findLowerBoundIndex(
     items: readonly PositionerItem[],
     predicate: (item: PositionerItem) => boolean,
 ): number {
@@ -150,13 +144,16 @@ function findLowerBound(
 
 function findFirstOverlappingItemIndex(items: readonly PositionerItem[], low: number): number {
     // First item that begins at or after `low`...
-    const startIndex = findLowerBound(items, (item) => item.top >= low);
+    const startIndex = findLowerBoundIndex(items, (item) => item.top >= low);
 
     // ...but the item above it may still reach down across `low`.
-    const itemAbove = startIndex > 0 ? getColumnItem(items, startIndex - 1) : undefined;
-    const overlapsStart = itemAbove !== undefined && itemAbove.top + itemAbove.height >= low;
-
-    return overlapsStart ? startIndex - 1 : startIndex;
+    if (startIndex > 0) {
+        const itemAbove = getColumnItem(items, startIndex - 1);
+        if (itemAbove.top + itemAbove.height >= low) {
+            return startIndex - 1;
+        }
+    }
+    return startIndex;
 }
 
 function parsePositionerOptions({
@@ -164,7 +161,7 @@ function parsePositionerOptions({
     columnWidth = DEFAULT_COLUMN_WIDTH,
     containerWidth,
     horizontalGap,
-    maxColumnCount,
+    maxColumnCount = Number.POSITIVE_INFINITY,
     verticalGap,
 }: PositionerOptions) {
     const normalizedContainerWidth = parsePositiveFiniteNumber(containerWidth, 0);
@@ -173,7 +170,7 @@ function parsePositionerOptions({
     const rowGap = parseFiniteNumber(verticalGap ?? columnGap, 0, DEFAULT_GAP);
 
     const hasValidColumnCount =
-        typeof columnCount === "number" && Number.isFinite(columnCount) && columnCount !== 0;
+        typeof columnCount === "number" && Number.isFinite(columnCount) && columnCount > 0;
 
     const derivedColumnCount = Math.min(
         Math.floor((normalizedContainerWidth + columnGap) / (normalizedColumnWidth + columnGap)),
@@ -204,13 +201,18 @@ function buildPositioner(options: PositionerOptions) {
 
     const items: PositionerItem[] = [];
     const columns: PositionerItem[][] = Array.from({ length: columnCount }, () => []);
+    const columnHeights: number[] = Array.from({ length: columnCount }, () => 0);
 
-    function getColumnHeights() {
-        return columns.map((_, columnIndex) => getColumnHeight(columns, columnIndex));
+    function getColumnHeight(columnIndex: number): number {
+        const height = columnHeights[columnIndex];
+        if (height === undefined) {
+            throw new Error("Masonry positioner invariant violated: missing column.");
+        }
+        return height;
     }
 
     function estimateHeight(itemCount: number, defaultItemHeight: number) {
-        const tallestColumn = Math.max(...getColumnHeights());
+        const tallestColumn = Math.max(...columnHeights);
         const remainingItemCount = Math.max(0, itemCount - items.length);
         const remainingRowCount = Math.ceil(remainingItemCount / columnCount);
         const leadingGap = items.length > 0 && remainingRowCount > 0 ? rowGap : 0;
@@ -241,17 +243,17 @@ function buildPositioner(options: PositionerOptions) {
 
     function pickPlacementColumn(itemHeight: number) {
         const roundRobinColumn = items.length % columnCount;
-        const shortestColumn = findShortestColumn(getColumnHeights());
-        const roundRobinColumnHeight = getColumnHeight(columns, roundRobinColumn) + itemHeight;
-        const maxAllowedHeight = shortestColumn.height + itemHeight * MAX_COLUMN_SKEW_RATIO;
-        return roundRobinColumnHeight <= maxAllowedHeight ? roundRobinColumn : shortestColumn.index;
+        const shortest = findShortestColumn(columnHeights);
+        const roundRobinColumnHeight = getColumnHeight(roundRobinColumn) + itemHeight;
+        const maxAllowedHeight = shortest.height + itemHeight * MAX_COLUMN_SKEW_RATIO;
+        return roundRobinColumnHeight <= maxAllowedHeight ? roundRobinColumn : shortest.index;
     }
 
     function set(height: number) {
         const itemHeight = parseMeasuredItemHeight(height);
         const columnIndex = pickPlacementColumn(itemHeight);
         const columnItems = getColumnItems(columns, columnIndex);
-        const top = columnItems.length > 0 ? getColumnHeight(columns, columnIndex) + rowGap : 0;
+        const top = columnItems.length > 0 ? getColumnHeight(columnIndex) + rowGap : 0;
         const item: PositionerItem = {
             columnIndex,
             columnItemIndex: columnItems.length,
@@ -262,10 +264,11 @@ function buildPositioner(options: PositionerOptions) {
         };
         items.push(item);
         columnItems.push(item);
+        columnHeights[columnIndex] = top + itemHeight;
     }
 
     function shortestColumn() {
-        return findShortestColumn(getColumnHeights()).height;
+        return findShortestColumn(columnHeights).height;
     }
 
     function size() {
@@ -274,7 +277,7 @@ function buildPositioner(options: PositionerOptions) {
 
     function collectUpdates(updates: readonly PositionerUpdate[]) {
         const nextHeightByIndex = new Map<number, number>();
-        const firstChangedIndexByColumn = new Map<number, number>();
+        const firstChangedItemByColumn = new Map<number, PositionerItem>();
 
         for (const update of updates) {
             if (!(update.index >= 0 && update.index < items.length)) {
@@ -282,22 +285,23 @@ function buildPositioner(options: PositionerOptions) {
                     `Masonry positioner invariant violated: update referenced index ${update.index}, but only ${items.length} items are placed.`,
                 );
             }
-            const existingItem = getColumnItem(items, update.index);
-            nextHeightByIndex.set(existingItem.index, parseMeasuredItemHeight(update.height));
-            const firstChangedIndex = firstChangedIndexByColumn.get(existingItem.columnIndex);
-            if (firstChangedIndex === undefined || existingItem.index < firstChangedIndex) {
-                firstChangedIndexByColumn.set(existingItem.columnIndex, existingItem.index);
+            nextHeightByIndex.set(update.index, parseMeasuredItemHeight(update.height));
+            const changedItem = getColumnItem(items, update.index);
+            const firstChangedItem = firstChangedItemByColumn.get(changedItem.columnIndex);
+            if (firstChangedItem === undefined || changedItem.index < firstChangedItem.index) {
+                firstChangedItemByColumn.set(changedItem.columnIndex, changedItem);
             }
         }
 
-        return { firstChangedIndexByColumn, nextHeightByIndex };
+        return { firstChangedItemByColumn, nextHeightByIndex };
     }
 
     function reflowColumn(
         firstChangedItem: PositionerItem,
         nextHeightByIndex: ReadonlyMap<number, number>,
     ) {
-        const columnItems = getColumnItems(columns, firstChangedItem.columnIndex);
+        const columnIndex = firstChangedItem.columnIndex;
+        const columnItems = getColumnItems(columns, columnIndex);
         let top = firstChangedItem.top;
         for (
             let itemIndex = firstChangedItem.columnItemIndex;
@@ -315,12 +319,14 @@ function buildPositioner(options: PositionerOptions) {
             items[previousItem.index] = nextItem;
             top += height + rowGap;
         }
+        const lastItem = getColumnItem(columnItems, columnItems.length - 1);
+        columnHeights[columnIndex] = lastItem.top + lastItem.height;
     }
 
     function update(updates: readonly PositionerUpdate[]) {
-        const { firstChangedIndexByColumn, nextHeightByIndex } = collectUpdates(updates);
-        for (const firstChangedIndex of firstChangedIndexByColumn.values()) {
-            reflowColumn(getColumnItem(items, firstChangedIndex), nextHeightByIndex);
+        const { firstChangedItemByColumn, nextHeightByIndex } = collectUpdates(updates);
+        for (const firstChangedItem of firstChangedItemByColumn.values()) {
+            reflowColumn(firstChangedItem, nextHeightByIndex);
         }
     }
 
@@ -686,7 +692,7 @@ export interface MasonryRootState {
 }
 
 export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRootState> {
-    /** Fixed number of columns. Ignored when unset; column count is derived from `columnWidth` and the container width. */
+    /** Fixed number of columns. Ignored when unset or non-positive; column count is derived from `columnWidth` and the container width. */
     columnCount?: number;
     /**
      * Preferred column width used to derive the column count (unless `columnCount` is
