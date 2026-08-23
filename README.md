@@ -146,8 +146,8 @@ this component deliberately lacks. Listed so you can decide whether they matter 
 
 ## Notes
 
-- Children must be keyed elements (`key={item.id}`). Non-element children (strings, numbers, fragments) are ignored. Items are kept in DOM order, so tab order and keyboard navigation follow the source order.
-- **Scrolling** follows the **window** scroll position (`window.scrollY`), not an inner scrollable container. If your layout scrolls inside an `overflow: auto` element, hook it up yourself or place the masonry inside the page scroller.
+- Children must be keyed elements (`key={item.id}`). Non-element children (strings, numbers, fragments) are ignored.
+- **Scrolling** follows the nearest vertically scrollable ancestor (`overflow: auto`/`scroll`), falling back to the window scroll position. The scroll source is resolved once when the masonry mounts; nested scrolling containers between it and the viewport are not tracked. Place the masonry directly inside the element that actually scrolls: an `overflow: auto` wrapper whose content never overflows still captures the scroll source, leaving the render window frozen while the page scrolls.
 - `columnWidth` is a _preferred_ width used to derive the column count. Items will always try to stretch to fill their (equal-width) columns for consistency.
 - The rendered window extends further **below** the viewport than above it: scrolling down races the unmeasured frontier (render + measurement lag), while everything above is already placed and only needs render-lag cover.
 - The root sets `height`, `position: relative`, `width: 100%`, and `maxWidth: 100%` inline as its layout contract. Your own `style` takes precedence over them (Base UI convention) — overriding `height` or `position` could break virtualization.

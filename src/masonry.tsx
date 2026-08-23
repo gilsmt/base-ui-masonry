@@ -360,9 +360,10 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
     return nextPositioner;
 }
 
-/* ------------------------------- Measurement layer ------------------------------- */
+/* --------------------------------- Measurement --------------------------------- */
 
-function createResizeObserver(
+function createItemResizeObserver(
+    getIndexByNode: (node: Element) => number | undefined,
     getRegisteredNode: (index: number) => Element | undefined,
     onMeasurementUpdate: (index: number, node: HTMLElement, height: number) => void,
 ): ResizeObserver | null {
@@ -371,20 +372,10 @@ function createResizeObserver(
     }
 
     function handleResizeObserver(entries: ResizeObserverEntry[]) {
-        // Entries are assumed to share the same window
-        const targetWindow = ownerWindow(entries[0]?.target);
-
         for (const entry of entries) {
-            if (!(entry.target instanceof targetWindow.HTMLElement)) {
-                continue;
-            }
-
-            // Mirrors [MasonryDataAttributes.index] written onto items by MasonryRoot
-            const entryIndex = Number.parseInt(
-                entry.target.getAttribute(MasonryDataAttributes.index) ?? "",
-                10,
-            );
-            if (Number.isNaN(entryIndex) || getRegisteredNode(entryIndex) !== entry.target) {
+            const target = entry.target as HTMLElement;
+            const entryIndex = getIndexByNode(target);
+            if (entryIndex === undefined || getRegisteredNode(entryIndex) !== target) {
                 continue;
             }
 
@@ -392,19 +383,39 @@ function createResizeObserver(
             const height =
                 typeof blockSize === "number" && Number.isFinite(blockSize)
                     ? Math.round(blockSize)
-                    : entry.target.offsetHeight;
+                    : target.offsetHeight;
 
-            onMeasurementUpdate(entryIndex, entry.target, height);
+            onMeasurementUpdate(entryIndex, target, height);
         }
     }
 
     return new ResizeObserver(handleResizeObserver);
 }
 
+function findVerticalScrollParent(element: HTMLElement): HTMLElement | null {
+    let current = element.parentElement;
+    const doc = ownerDocument(element);
+    const win = ownerWindow(element);
+    while (current && current !== doc.documentElement && current !== doc.body) {
+        const { overflowY } = win.getComputedStyle(current);
+        if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
+            return current;
+        }
+        current = current.parentElement;
+    }
+    return null;
+}
+
 interface Measurements {
     containerOffset: number;
     containerWidth: number;
     scrollY: number;
+    windowHeight: number;
+}
+
+interface Layout {
+    containerOffset: number;
+    containerWidth: number;
     windowHeight: number;
 }
 
@@ -428,11 +439,12 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
     const [measurements, setMeasurements] = React.useState<Measurements>(DEFAULT_MEASUREMENTS);
     const isScrollingRef = React.useRef(false);
     const shouldReadLayoutRef = React.useRef(true);
+    const scrollElementRef = React.useRef<HTMLElement | null>(null);
 
     const scrollYTimeout = useTimeout();
     const animationFrame = useAnimationFrame();
 
-    const syncMeasurements = useStableCallback(() => {
+    const sync = useStableCallback(() => {
         const container = containerRef.current;
         if (!container) {
             return;
@@ -441,37 +453,49 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
         const shouldReadLayout = shouldReadLayoutRef.current;
         shouldReadLayoutRef.current = false;
 
-        const scrollY =
-            ownerWindow(container).scrollY ?? ownerDocument(container).documentElement.scrollTop;
+        const scrollElement = scrollElementRef.current;
+        const win = ownerWindow(container);
+        const scrollY = scrollElement ? scrollElement.scrollTop : win.scrollY;
 
-        const layoutFields = shouldReadLayout
-            ? {
-                  containerOffset: container.getBoundingClientRect().top + scrollY,
-                  containerWidth: container.clientWidth,
-                  windowHeight: ownerDocument(container).documentElement.clientHeight,
-              }
-            : null;
+        let layout: Layout | null = null;
+        if (shouldReadLayout) {
+            const containerRect = container.getBoundingClientRect();
+            layout = scrollElement
+                ? {
+                      containerOffset:
+                          containerRect.top -
+                          scrollElement.getBoundingClientRect().top +
+                          scrollY -
+                          (parseFloat(win.getComputedStyle(scrollElement).borderTopWidth) || 0),
+                      containerWidth: container.clientWidth,
+                      windowHeight: scrollElement.clientHeight,
+                  }
+                : {
+                      containerOffset: containerRect.top + scrollY,
+                      containerWidth: container.clientWidth,
+                      windowHeight: ownerDocument(container).documentElement.clientHeight,
+                  };
+        }
+
+        const next: Measurements = {
+            containerOffset: layout?.containerOffset ?? measurements.containerOffset,
+            containerWidth: layout?.containerWidth ?? measurements.containerWidth,
+            scrollY,
+            windowHeight: layout?.windowHeight ?? measurements.windowHeight,
+        };
+
+        if (areMeasurementsEqual(measurements, next)) {
+            return;
+        }
 
         flushSync(() => {
-            setMeasurements((previous) => {
-                const next: Measurements = {
-                    containerOffset: layoutFields?.containerOffset ?? previous.containerOffset,
-                    containerWidth: layoutFields?.containerWidth ?? previous.containerWidth,
-                    scrollY,
-                    windowHeight: layoutFields?.windowHeight ?? previous.windowHeight,
-                };
-                return areMeasurementsEqual(previous, next) ? previous : next;
-            });
+            setMeasurements(next);
         });
-    });
-
-    const scheduleScrollSync = useStableCallback(() => {
-        animationFrame.request(syncMeasurements);
     });
 
     const scheduleLayoutSync = useStableCallback(() => {
         shouldReadLayoutRef.current = true;
-        scheduleScrollSync();
+        animationFrame.request(sync);
     });
 
     const finishScrolling = useStableCallback(() => {
@@ -484,7 +508,7 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
         isScrollingRef.current = true;
 
         if (wasScrolling) {
-            scheduleScrollSync();
+            animationFrame.request(sync);
         } else {
             // First event of a gesture: geometry may have changed since the
             // previous scroll ended, so take a full reading.
@@ -498,6 +522,11 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
         if (!container) {
             return;
         }
+
+        const win = ownerWindow(container);
+        const scrollElement = findVerticalScrollParent(container);
+        scrollElementRef.current = scrollElement;
+
         scheduleLayoutSync();
 
         const resizeObserver =
@@ -505,26 +534,40 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
 
         if (resizeObserver) {
             resizeObserver.observe(container);
-            // Shifts inside the offset parent (e.g. siblings growing) move the
-            // container without resizing it, so `containerOffset` would go stale.
-            const offsetParent =
-                container.offsetParent ?? ownerDocument(container).scrollingElement;
-            if (offsetParent && offsetParent !== container) {
-                resizeObserver.observe(offsetParent);
+            if (scrollElement) {
+                resizeObserver.observe(scrollElement);
+            }
+            // Shifts originating outside the container (e.g. siblings growing)
+            // move it without resizing it, leaving `containerOffset` stale.
+            // Observe the full `offsetParent` chain above the container: a shift
+            // displacing it almost always resizes one of these ancestors.
+            let offsetAncestor = container.offsetParent as HTMLElement | null;
+            if (!offsetAncestor) {
+                // Not laid out yet (hidden) or fixed-positioned: keep a root sentinel
+                // so late layout changes are still reported.
+                offsetAncestor = ownerDocument(container).scrollingElement as HTMLElement | null;
+            }
+            while (offsetAncestor) {
+                resizeObserver.observe(offsetAncestor);
+                // Terminates at `<body>`/`<html>`, whose `offsetParent` is `null`.
+                offsetAncestor = offsetAncestor.offsetParent as HTMLElement | null;
             }
         }
 
-        const win = ownerWindow(container);
         return mergeCleanups(
-            addEventListener(win, "scroll", handleScroll, { passive: true }),
+            addEventListener(scrollElement ?? win, "scroll", handleScroll, { passive: true }),
             addEventListener(win, "resize", scheduleLayoutSync),
             addEventListener(win, "orientationchange", scheduleLayoutSync),
             win.visualViewport
                 ? addEventListener(win.visualViewport, "resize", scheduleLayoutSync)
                 : null,
             resizeObserver ? () => resizeObserver.disconnect() : null,
+            () => {
+                scrollElementRef.current = null;
+                isScrollingRef.current = false;
+            },
         );
-    }, [animationFrame, containerRef, handleScroll, scheduleLayoutSync, scheduleScrollSync]);
+    }, [containerRef, handleScroll, scheduleLayoutSync]);
 
     return {
         containerWidth: measurements.containerWidth,
@@ -533,7 +576,7 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
     };
 }
 
-/* ------------------- Binding: registries, caches, and components ------------------- */
+/* -------------------- Binding: registries, caches, and components -------------------- */
 
 interface MasonryItemSlotProps
     extends React.HTMLAttributes<HTMLDivElement>, React.RefAttributes<HTMLDivElement> {
@@ -773,7 +816,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const committedItemKeysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
     const positioner = positionerRef.current;
 
-    const commitMeasurements = useStableCallback(() => {
+    const commitQueuedMeasurements = useStableCallback(() => {
         const pendingMeasurements = pendingMeasurementsRef.current;
         pendingMeasurementsRef.current = new Map();
 
@@ -790,29 +833,32 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         }
     });
 
-    const scheduleMeasurementsChanged = useStableCallback(() => {
-        animationFrame.request(commitMeasurements);
-    });
-
-    const getRegisteredNode = useStableCallback((index: number) =>
-        itemRegistrationCacheRef.current.nodes.get(index),
-    );
-
-    const queueItemMeasurement = useStableCallback(
+    const queueMeasurementCommit = useStableCallback(
         (index: number, node: HTMLElement, measuredHeight?: number) => {
             pendingMeasurementsRef.current.set(index, {
                 height: measuredHeight,
                 node,
             });
-            scheduleMeasurementsChanged();
+            animationFrame.request(commitQueuedMeasurements);
         },
     );
 
+    const itemIndexByNode = useRefWithInit(() => new WeakMap<Element, number>());
+
     const resizeObserver = useRefWithInit(() =>
-        createResizeObserver(getRegisteredNode, queueItemMeasurement),
+        createItemResizeObserver(
+            (node) => itemIndexByNode.current.get(node),
+            (index) => itemRegistrationCacheRef.current.nodes.get(index),
+            queueMeasurementCommit,
+        ),
     ).current;
 
     useIsoLayoutEffect(() => () => resizeObserver?.disconnect(), [resizeObserver]);
+
+    const unregisterItemNode = (node: HTMLDivElement) => {
+        resizeObserver?.unobserve(node);
+        itemIndexByNode.current.delete(node);
+    };
 
     // React.Children.toArray is opaque to the React Compiler
     // so memoize manually to keep both arrays stable
@@ -830,7 +876,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         const previousNode = registrationCache.nodes.get(index);
         if (node === null) {
             if (previousNode) {
-                resizeObserver?.unobserve(previousNode);
+                unregisterItemNode(previousNode);
                 registrationCache.nodes.delete(index);
                 const pendingMeasurement = pendingMeasurementsRef.current.get(index);
                 if (pendingMeasurement?.node === previousNode) {
@@ -842,16 +888,16 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
 
         // The same node can re-attach (e.g. restored from the element cache);
         // only re-measure when the positioner was rebuilt and lost this index.
-        const position = positionerRef.current.get(index);
-        if (previousNode === node && position !== undefined) {
+        if (previousNode === node && positionerRef.current.get(index) !== undefined) {
             return;
         }
         if (previousNode && previousNode !== node) {
-            resizeObserver?.unobserve(previousNode);
+            unregisterItemNode(previousNode);
         }
         resizeObserver?.observe(node);
         registrationCache.nodes.set(index, node);
-        queueItemMeasurement(index, node);
+        itemIndexByNode.current.set(node, index);
+        queueMeasurementCommit(index, node);
     });
 
     const onItemRegister = (index: number, childRef: React.Ref<HTMLDivElement> | undefined) => {
@@ -866,9 +912,13 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     };
 
     const resetItemCaches = useStableCallback(() => {
-        resizeObserver?.disconnect();
-        itemRegistrationCacheRef.current.callbacks.clear();
-        itemRegistrationCacheRef.current.nodes.clear();
+        const registrationCache = itemRegistrationCacheRef.current;
+        for (const node of registrationCache.nodes.values()) {
+            resizeObserver?.unobserve(node);
+            itemIndexByNode.current.delete(node);
+        }
+        registrationCache.callbacks.clear();
+        registrationCache.nodes.clear();
         pendingMeasurementsRef.current.clear();
         elementCacheRef.current.clear();
     });
