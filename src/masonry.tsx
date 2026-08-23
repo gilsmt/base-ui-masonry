@@ -47,7 +47,7 @@ enum MasonryDataAttributes {
     slot = "data-slot",
 }
 
-/* ---------------------------------- Shared value parsing --------------------------------- */
+/* ---------------------------------- Shared utils --------------------------------- */
 
 function parseGapDirectionalValues(gap?: number | { horizontal: number; vertical: number }) {
     if (gap && typeof gap === "object") {
@@ -71,7 +71,7 @@ function parseMeasuredItemHeight(value: number | undefined) {
     return Math.max(parsePositiveFiniteNumber(value, 0), 1);
 }
 
-/* ---------------------------- Positioner engine --------------------------- */
+/* ---------------------------- Positioner --------------------------- */
 
 interface PositionerItem {
     readonly columnIndex: number;
@@ -83,8 +83,8 @@ interface PositionerItem {
 }
 
 interface PositionerUpdate {
-    height: number;
-    index: number;
+    readonly height: number;
+    readonly index: number;
 }
 
 interface PositionerOptions {
@@ -134,9 +134,9 @@ function findLowerBound(
     items: readonly PositionerItem[],
     predicate: (item: PositionerItem) => boolean,
 ): number {
+    // binary search
     let start = 0;
     let end = items.length;
-
     while (start < end) {
         const middle = (start + end) >>> 1;
         if (predicate(getColumnItem(items, middle))) {
@@ -145,7 +145,6 @@ function findLowerBound(
             start = middle + 1;
         }
     }
-
     return start;
 }
 
@@ -563,7 +562,7 @@ interface PendingItemMeasurement {
 function isMasonryChildElement(
     node: React.ReactNode,
 ): node is React.ReactElement<MasonryItemSlotProps> {
-    return React.isValidElement(node);
+    return React.isValidElement(node) && node.type !== React.Fragment;
 }
 
 function attachForkedRef(
@@ -647,7 +646,6 @@ function commitPendingMeasurements(
         }
 
         const height = parseMeasuredItemHeight(getMeasuredHeight(measurement.node, measurement));
-        // Compare against the rounded stored height to skip no-op updates.
         if (height !== Math.round(item.height)) {
             updates.push({ height, index: measurementIndex });
         }
@@ -667,7 +665,6 @@ function areItemKeysPrefixEqual(
 ) {
     return (
         previousKeys === nextKeys ||
-        // A shortened list is never a prefix extension
         (previousKeys.length <= nextKeys.length &&
             previousKeys.every((key, index) => key === nextKeys[index]))
     );
@@ -696,7 +693,11 @@ export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRoo
      * set). Items always stretch to fill their column. @default 200
      */
     columnWidth?: number;
-    /** Gap between columns and rows, or directional gaps as an object. @default 0 */
+    /**
+     * Gap between columns and rows, or directional gaps as an object. When an
+     * object is provided, `vertical` defaults to `horizontal`.
+     * @default 0
+     */
     gap?: number | { horizontal: number; vertical: number };
     /**
      * Assumed average item height for container-height and batch-size estimates while
@@ -1002,10 +1003,12 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         }
     }
 
-    if (elementCacheRef.current.size > positionedChildren.length * 2 + CACHE_PRUNE_SLACK) {
-        pruneMapEntries(elementCacheRef.current, appendedIndices);
-        pruneMapEntries(itemRegistrationCacheRef.current.callbacks, appendedIndices);
-    }
+    useIsoLayoutEffect(() => {
+        if (elementCacheRef.current.size > positionedChildren.length * 2 + CACHE_PRUNE_SLACK) {
+            pruneMapEntries(elementCacheRef.current, appendedIndices);
+            pruneMapEntries(itemRegistrationCacheRef.current.callbacks, appendedIndices);
+        }
+    });
 
     const height = Math.ceil(positioner.estimateHeight(itemCount, normalizedItemHeight));
 
