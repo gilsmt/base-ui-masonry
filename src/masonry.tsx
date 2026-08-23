@@ -5,12 +5,14 @@ import type { BaseUIComponentProps } from "@base-ui/react/internals/types";
 import { addEventListener } from "@base-ui/utils/addEventListener";
 import { mergeCleanups } from "@base-ui/utils/mergeCleanups";
 import { ownerDocument, ownerWindow } from "@base-ui/utils/owner";
+import { warn } from "@base-ui/utils/warn";
 import { useAnimationFrame } from "@base-ui/utils/useAnimationFrame";
 import { useForcedRerendering } from "@base-ui/utils/useForcedRerendering";
 import { useIsoLayoutEffect } from "@base-ui/utils/useIsoLayoutEffect";
 import { useRefWithInit } from "@base-ui/utils/useRefWithInit";
 import { useStableCallback } from "@base-ui/utils/useStableCallback";
 import { useTimeout } from "@base-ui/utils/useTimeout";
+import { useValueAsRef } from "@base-ui/utils/useValueAsRef";
 import { flushSync } from "react-dom";
 import * as React from "react";
 
@@ -587,7 +589,10 @@ interface MasonrySlotAttributes extends MasonryItemSlotProps {
     [MasonryDataAttributes.slot]: string;
 }
 
-type ItemRefFork = ReturnType<typeof createItemRefFork>;
+interface ItemRefFork {
+    callback: React.RefCallback<HTMLDivElement>;
+    childRef: React.Ref<HTMLDivElement> | undefined;
+}
 
 interface ItemRegistrationCache {
     callbacks: Map<number, ItemRefFork>;
@@ -600,12 +605,24 @@ interface CachedItemElement {
     columnWidth: number;
     inert: boolean;
     item: PositionerItem | null;
-    itemCount: number;
 }
 
 interface PendingItemMeasurement {
     height?: number;
     node: HTMLElement;
+}
+
+function isSamePlacement(first: PositionerItem | null, second: PositionerItem | null) {
+    if (first === second) {
+        return true;
+    }
+    return (
+        first !== null &&
+        second !== null &&
+        first.left === second.left &&
+        first.top === second.top &&
+        first.height === second.height
+    );
 }
 
 function isMasonryChildElement(
@@ -679,18 +696,11 @@ function commitPendingMeasurements(
         didChange = true;
     }
 
-    // Remaining updates target already-placed items; entries whose node was
-    // unregistered or replaced in the meantime are stale and skipped.
+    // Updates target placed items; entries beyond the placed prefix, or whose
+    // node was unregistered or replaced in the meantime, are stale and skipped.
     for (const [measurementIndex, measurement] of pendingMeasurements) {
-        if (measurementIndex >= measuredItemCount) {
-            continue;
-        }
-        if (registeredNodes.get(measurementIndex) !== measurement.node) {
-            continue;
-        }
-
         const item = positioner.get(measurementIndex);
-        if (item === undefined) {
+        if (item === undefined || registeredNodes.get(measurementIndex) !== measurement.node) {
             continue;
         }
 
@@ -724,6 +734,13 @@ function pruneMapEntries<K, V>(map: Map<K, V>, retainedKeys: ReadonlySet<K>) {
         if (!retainedKeys.has(key)) {
             map.delete(key);
         }
+    }
+}
+
+function syncAriaSetSize(node: HTMLDivElement, setSize: number) {
+    const nextSetSize = String(setSize);
+    if (node.getAttribute("aria-setsize") !== nextSetSize) {
+        node.setAttribute("aria-setsize", nextSetSize);
     }
 }
 
@@ -773,16 +790,16 @@ export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRoo
  */
 export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElement {
     const {
-        columnWidth = DEFAULT_COLUMN_WIDTH,
+        children: childrenProp,
         columnCount,
-        maxColumnCount: maxColumnCountProp,
+        columnWidth = DEFAULT_COLUMN_WIDTH,
         gap = DEFAULT_GAP,
         itemHeight = DEFAULT_ITEM_HEIGHT,
+        maxColumnCount: maxColumnCountProp,
         overscan = DEFAULT_OVERSCAN,
-        children: childrenProp,
         className,
-        style: styleProp,
         render,
+        style,
         ...elementProps
     } = componentProps;
     const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -807,14 +824,31 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const committedOptionsRef = useRefWithInit(() => latestOptions);
     const rerender = useForcedRerendering();
     const animationFrame = useAnimationFrame();
+
     const itemRegistrationCacheRef = useRefWithInit<ItemRegistrationCache>(() => ({
         callbacks: new Map(),
         nodes: new Map(),
     }));
-    const pendingMeasurementsRef = React.useRef(new Map<number, PendingItemMeasurement>());
+    const pendingMeasurementsRef = useRefWithInit<Map<number, PendingItemMeasurement>>(
+        () => new Map(),
+    );
     const elementCacheRef = useRefWithInit<Map<number, CachedItemElement>>(() => new Map());
     const committedItemKeysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
     const positioner = positionerRef.current;
+
+    // React.Children.toArray is opaque to the React Compiler,
+    // so memoize manually to keep both arrays stable
+    const validChildren = React.useMemo(
+        () => React.Children.toArray(childrenProp).filter(isMasonryChildElement),
+        [childrenProp],
+    );
+    const currentItemKeys = React.useMemo(
+        () => validChildren.map((child) => child.key),
+        [validChildren],
+    );
+
+    const itemCount = validChildren.length;
+    const itemCountRef = useValueAsRef(itemCount);
 
     const commitQueuedMeasurements = useStableCallback(() => {
         const pendingMeasurements = pendingMeasurementsRef.current;
@@ -860,17 +894,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         itemIndexByNode.current.delete(node);
     };
 
-    // React.Children.toArray is opaque to the React Compiler
-    // so memoize manually to keep both arrays stable
-    const validChildren = React.useMemo(
-        () => React.Children.toArray(childrenProp).filter(isMasonryChildElement),
-        [childrenProp],
-    );
-    const currentItemKeys = React.useMemo(
-        () => validChildren.map((child) => child.key),
-        [validChildren],
-    );
-
     const registerItemNode = useStableCallback((index: number, node: HTMLDivElement | null) => {
         const registrationCache = itemRegistrationCacheRef.current;
         const previousNode = registrationCache.nodes.get(index);
@@ -897,10 +920,11 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         resizeObserver?.observe(node);
         registrationCache.nodes.set(index, node);
         itemIndexByNode.current.set(node, index);
+        syncAriaSetSize(node, itemCountRef.current);
         queueMeasurementCommit(index, node);
     });
 
-    const onItemRegister = (index: number, childRef: React.Ref<HTMLDivElement> | undefined) => {
+    const handleItemRegister = (index: number, childRef: React.Ref<HTMLDivElement> | undefined) => {
         const registrationCache = itemRegistrationCacheRef.current;
         const existingFork = registrationCache.callbacks.get(index);
         if (!existingFork || existingFork.childRef !== childRef) {
@@ -924,17 +948,19 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     });
 
     useIsoLayoutEffect(() => {
+        const shouldRebuildPositioner = committedOptionsRef.current !== latestOptions;
         const shouldResetPositioner =
             committedItemKeysRef.current !== null &&
             !areItemKeysPrefixEqual(committedItemKeysRef.current, currentItemKeys);
-
-        const shouldRebuildPositioner = committedOptionsRef.current !== latestOptions;
 
         committedItemKeysRef.current = currentItemKeys;
         committedOptionsRef.current = latestOptions;
 
         if (shouldResetPositioner || shouldRebuildPositioner) {
             if (shouldResetPositioner) {
+                warn(
+                    "MasonryRoot: item keys changed by more than appending (reorder, insertion, or removal), so all layout measurements were reset. Provide stable `key`s and limit updates to appending items.",
+                );
                 resetItemCaches();
             }
 
@@ -944,12 +970,11 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
 
             rerender();
         }
-    }, [resetItemCaches, currentItemKeys, latestOptions, rerender]);
+    }, [currentItemKeys, latestOptions, rerender, resetItemCaches]);
 
     const firstUnmeasuredIndex = positioner.size();
     const shortestColumnSize = positioner.shortestColumn();
 
-    const itemCount = validChildren.length;
     const normalizedOverscan =
         overscan === Infinity ? overscan : parseFiniteNumber(overscan, 0, DEFAULT_OVERSCAN);
     const overscanPixels = windowHeight > 0 ? windowHeight * normalizedOverscan : 0;
@@ -960,9 +985,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const rangeStart = Math.max(0, scrollTop - backwardOverscanPixels);
     const rangeEnd = scrollTop + windowHeight + forwardOverscanPixels;
 
-    // Items remain to batch in while the layout doesn't cover the window:
-    // either nothing is placed yet, or the placed columns stop short of the
-    // window's bottom edge.
     const windowNeedsMoreItems = firstUnmeasuredIndex === 0 || shortestColumnSize < rangeEnd;
     const isLayoutOutdated = windowNeedsMoreItems && firstUnmeasuredIndex < itemCount;
 
@@ -970,16 +992,15 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         position: "absolute",
         width: positioner.columnWidth,
         writingMode: "horizontal-tb", // Match measurements to a horizontal axis under vertical-writing ancestors
+        left: 0,
+        top: 0,
         ...(item
             ? {
                   contentVisibility: "auto",
                   containIntrinsicHeight: `auto ${Math.max(1, Math.ceil(item.height))}px`,
-                  left: item.left,
-                  top: item.top,
+                  transform: `translateX(${item.left}px) translateY(${item.top}px)`,
               }
             : {
-                  left: 0,
-                  top: 0,
                   visibility: "hidden",
               }),
     });
@@ -987,31 +1008,25 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const positionedChildren: React.ReactElement[] = [];
     const appendedIndices = new Set<number>();
 
-    const appendPositionedChild = (
-        index: number,
-        item: PositionerItem | null,
-        options?: { inert?: boolean },
-    ) => {
+    const appendPositionedChild = (index: number, item: PositionerItem | null, inert = false) => {
         const child = validChildren[index];
         if (!child) {
             return;
         }
 
         const elementCache = elementCacheRef.current;
-        const inert = options?.inert === true;
         const cached = elementCache.get(index);
+
         if (
             !cached ||
             cached.child !== child ||
-            cached.item !== item ||
+            !isSamePlacement(cached.item, item) ||
             cached.columnWidth !== positioner.columnWidth ||
-            cached.inert !== inert ||
-            cached.itemCount !== itemCount
+            cached.inert !== inert
         ) {
             const cloned = React.cloneElement(child, {
                 [MasonryDataAttributes.index]: index,
-                ref: onItemRegister(index, child.props.ref),
-                // The window is a slice of the list; keep the announced size/position intact
+                ref: handleItemRegister(index, child.props.ref),
                 "aria-posinset": index + 1,
                 "aria-setsize": itemCount,
                 ...(inert && { inert }),
@@ -1026,7 +1041,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
                 columnWidth: positioner.columnWidth,
                 inert,
                 item,
-                itemCount,
             });
             positionedChildren.push(cloned);
         } else {
@@ -1050,11 +1064,10 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
             itemCount - firstUnmeasuredIndex,
             Math.max(minimumBatchSize, estimatedBatchSize),
         );
-
         if (batchSize > 0) {
-            const end = Math.min(itemCount, firstUnmeasuredIndex + batchSize);
+            const end = firstUnmeasuredIndex + batchSize;
             for (let index = firstUnmeasuredIndex; index < end; index += 1) {
-                appendPositionedChild(index, null, { inert: true });
+                appendPositionedChild(index, null, true);
             }
         }
     }
@@ -1065,6 +1078,14 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
             pruneMapEntries(itemRegistrationCacheRef.current.callbacks, appendedIndices);
         }
     });
+
+    // Keep `aria-setsize` on mounted items in sync without invalidating the
+    // element cache (clones are reused so React can bail out)
+    useIsoLayoutEffect(() => {
+        for (const node of itemRegistrationCacheRef.current.nodes.values()) {
+            syncAriaSetSize(node, itemCount);
+        }
+    }, [itemCount]);
 
     const height = Math.ceil(positioner.estimateHeight(itemCount, normalizedItemHeight));
 
