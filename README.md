@@ -58,10 +58,8 @@ The custom component must forward the `ref`, and spread all the received props o
 
 | Bundle                                                                   | Minified | Gzipped | Brotli  |
 | ------------------------------------------------------------------------ | -------- | ------- | ------- |
-| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 10.94 kB | 4.49 kB | 4.07 kB |
-| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 18.14 kB | 7.12 kB | 6.45 kB |
-
-For reference, the raw source file is 39.87 kB / ~1,110 lines (9.59 kB gzipped), and `Bun` bundler produces the numbers above (`bun build --minify`, react/react-dom external).
+| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.87 kB  | 4.18 kB | 3.76 kB |
+| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.52 kB | 6.67 kB | 6.00 kB |
 
 ## API reference
 
@@ -130,27 +128,19 @@ Renders a `<div>` element.
 - Replacing the estimate with measured heights can cause minor layout shift on slow connections;
   realistic `itemHeight`/`gap` values minimize it.
 
-### Streaming (RSC / Suspense)
-
-Growing the children list by **appending keys** (the typical streaming pattern) never resets the
-layout — already-measured items keep their positions and new items join the unmeasured frontier.
-Removing, prepending, or reordering keys resets the measurement caches and rebuilds the positioner,
-so keep keys stable and append-only for progressive rendering.
-
 ## Scope & trade-offs
 
 Affordances that peer virtualizers (react-window, TanStack Virtual, react-virtuoso) ship, which
 this component deliberately lacks. Listed so you can decide whether they matter before vendoring:
 
 - **No imperative API.** For jump-to-item UIs: Rendered items expose `data-index`, so you can find one with `container.querySelector('[data-index="42"]')` and call `scrollIntoView()`. Items outside the rendered window have no DOM node — scroll to an estimated offset derived from `itemHeight` instead, then refine once the item mounts.
-- **No RTL support.** Columns are placed left-to-right with physical `left` offsets, so `direction: rtl` does not mirror the layout: the first column remains leftmost even when the reading order is right-to-left. Screen-reader order (`aria-posinset`) still follows source order.
+- **No RTL support.** Columns are placed left-to-right, so `direction: rtl` does not mirror the layout: the first column remains leftmost even when the reading order is right-to-left. Screen-reader order (`aria-posinset`) follows source order.
 
 ## Notes
 
 - Children must be keyed elements (`key={item.id}`). Non-element children (strings, numbers, fragments) are ignored.
 - `columnWidth` is a _preferred_ width used to derive the column count. Items will always try to stretch to fill their (equal-width) columns for consistency.
 - The rendered window extends further **below** the viewport than above it: scrolling down races the unmeasured frontier (render + measurement lag), while everything above is already placed and only needs render-lag cover.
-- `overscan={0}` restricts rendering to exactly the viewport; `overscan={Infinity}` disables virtualization entirely (every item is mounted and measured).
 
 ## Contributing
 
