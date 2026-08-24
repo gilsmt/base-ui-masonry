@@ -30,11 +30,12 @@ const DEFAULT_FORWARD_OVERSCAN = 0.6;
 // https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollend_event
 const SCROLL_TIMEOUT_MS = 100;
 
-// Max excess of the round-robin column over the shortest, in item heights
 const MAX_COLUMN_SKEW_RATIO = 2.5;
 
 // Caches are pruned only past twice the rendered window plus this slack
 const CACHE_PRUNE_SLACK = 32;
+
+const MINIMUM_COLUMN_WIDTH = 1;
 
 const MasonryDataAttributes = {
     /**
@@ -70,7 +71,7 @@ function parsePositiveFiniteNumber(value: number | undefined, fallback: number) 
 }
 
 function parseMeasuredItemHeight(value: number | undefined) {
-    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 1;
+    return parsePositiveFiniteNumber(value, 1);
 }
 
 /* ------------------------------------- Positioner ------------------------------------ */
@@ -98,20 +99,8 @@ interface PositionerOptions {
     verticalGap?: number;
 }
 
-function getColumnItem(items: readonly PositionerItem[], index: number): PositionerItem {
-    const item = items[index];
-    if (!item) {
-        throw new Error("Masonry positioner invariant violated: sparse column index.");
-    }
-    return item;
-}
-
-function getColumnItems(columns: PositionerItem[][], columnIndex: number): PositionerItem[] {
-    const items = columns[columnIndex];
-    if (!items) {
-        throw new Error("Masonry positioner invariant violated: missing column.");
-    }
-    return items;
+function getItem<T>(items: readonly T[], index: number): T {
+    return items[index]!;
 }
 
 function findShortestColumn(columnHeights: readonly number[]): { height: number; index: number } {
@@ -135,7 +124,7 @@ function findLowerBoundIndex(
     let end = items.length;
     while (start < end) {
         const middle = (start + end) >>> 1;
-        if (predicate(getColumnItem(items, middle))) {
+        if (predicate(getItem(items, middle))) {
             end = middle;
         } else {
             start = middle + 1;
@@ -150,7 +139,7 @@ function findFirstOverlappingItemIndex(items: readonly PositionerItem[], low: nu
 
     // ...but the item above it may still reach down across `low`.
     if (startIndex > 0) {
-        const itemAbove = getColumnItem(items, startIndex - 1);
+        const itemAbove = getItem(items, startIndex - 1);
         if (itemAbove.top + itemAbove.height >= low) {
             return startIndex - 1;
         }
@@ -169,17 +158,16 @@ function parsePositionerOptions({
     const normalizedContainerWidth = parsePositiveFiniteNumber(containerWidth, 0);
     const normalizedColumnWidth = parsePositiveFiniteNumber(columnWidth, DEFAULT_COLUMN_WIDTH);
     const columnGap = parseFiniteNumber(horizontalGap, 0, DEFAULT_GAP);
-    const rowGap = parseFiniteNumber(verticalGap ?? columnGap, 0, DEFAULT_GAP);
-
-    const hasValidColumnCount =
-        typeof columnCount === "number" && Number.isFinite(columnCount) && columnCount > 0;
-
+    const rowGap = parseFiniteNumber(verticalGap, 0, columnGap);
+    const maxFittingColumnCount = Math.floor(
+        (normalizedContainerWidth + columnGap) / (MINIMUM_COLUMN_WIDTH + columnGap),
+    );
     const derivedColumnCount = Math.min(
         Math.floor((normalizedContainerWidth + columnGap) / (normalizedColumnWidth + columnGap)),
+        maxFittingColumnCount,
         maxColumnCount,
     );
-
-    const requestedColumnCount = hasValidColumnCount ? columnCount : derivedColumnCount;
+    const requestedColumnCount = parsePositiveFiniteNumber(columnCount, derivedColumnCount);
     const resolvedColumnCount = Math.max(1, Math.floor(requestedColumnCount));
 
     const resolvedColumnWidth = Math.max(
@@ -190,6 +178,12 @@ function parsePositionerOptions({
         ),
     );
 
+    if (resolvedColumnWidth === 0 && normalizedContainerWidth > 0) {
+        warn(
+            "MasonryRoot: `columnCount` exceeds the container space, collapsing columns to zero width and overlapping items. Increase the container width, reduce `columnCount`, or lower the horizontal gap.",
+        );
+    }
+
     return {
         columnCount: resolvedColumnCount,
         columnGap,
@@ -198,20 +192,24 @@ function parsePositionerOptions({
     };
 }
 
+function areResolvedOptionsEqual(
+    a: ReturnType<typeof parsePositionerOptions>,
+    b: ReturnType<typeof parsePositionerOptions>,
+) {
+    return (
+        a.columnCount === b.columnCount &&
+        a.columnGap === b.columnGap &&
+        a.columnWidth === b.columnWidth &&
+        a.rowGap === b.rowGap
+    );
+}
+
 function buildPositioner(options: PositionerOptions) {
     const { columnCount, columnGap, columnWidth, rowGap } = parsePositionerOptions(options);
 
     const items: PositionerItem[] = [];
     const columns: PositionerItem[][] = Array.from({ length: columnCount }, () => []);
     const columnHeights: number[] = Array.from({ length: columnCount }, () => 0);
-
-    function getColumnHeight(columnIndex: number): number {
-        const height = columnHeights[columnIndex];
-        if (height === undefined) {
-            throw new Error("Masonry positioner invariant violated: missing column.");
-        }
-        return height;
-    }
 
     function estimateHeight(itemCount: number, defaultItemHeight: number) {
         const tallestColumn = Math.max(...columnHeights);
@@ -234,7 +232,7 @@ function buildPositioner(options: PositionerOptions) {
         for (const columnItems of columns) {
             const start = findFirstOverlappingItemIndex(columnItems, low);
             for (let index = start; index < columnItems.length; index += 1) {
-                const item = getColumnItem(columnItems, index);
+                const item = getItem(columnItems, index);
                 if (item.top > high) {
                     break; // past the visible window
                 }
@@ -246,7 +244,7 @@ function buildPositioner(options: PositionerOptions) {
     function pickPlacementColumn(itemHeight: number) {
         const roundRobinColumn = items.length % columnCount;
         const shortest = findShortestColumn(columnHeights);
-        const roundRobinColumnHeight = getColumnHeight(roundRobinColumn) + itemHeight;
+        const roundRobinColumnHeight = getItem(columnHeights, roundRobinColumn) + itemHeight;
         const maxAllowedHeight = shortest.height + itemHeight * MAX_COLUMN_SKEW_RATIO;
         return roundRobinColumnHeight <= maxAllowedHeight ? roundRobinColumn : shortest.index;
     }
@@ -254,8 +252,8 @@ function buildPositioner(options: PositionerOptions) {
     function set(height: number) {
         const itemHeight = parseMeasuredItemHeight(height);
         const columnIndex = pickPlacementColumn(itemHeight);
-        const columnItems = getColumnItems(columns, columnIndex);
-        const top = columnItems.length > 0 ? getColumnHeight(columnIndex) + rowGap : 0;
+        const columnItems = getItem(columns, columnIndex);
+        const top = columnItems.length > 0 ? getItem(columnHeights, columnIndex) + rowGap : 0;
         const item: PositionerItem = {
             columnIndex,
             columnItemIndex: columnItems.length,
@@ -283,12 +281,13 @@ function buildPositioner(options: PositionerOptions) {
 
         for (const update of updates) {
             if (!(update.index >= 0 && update.index < items.length)) {
-                throw new Error(
-                    `Masonry positioner invariant violated: update referenced index ${update.index}, but only ${items.length} items are placed.`,
+                warn(
+                    `MasonryRoot: ignoring measurement update for index ${update.index}, which is not placed (${items.length} placed).`,
                 );
+                continue;
             }
             nextHeightByIndex.set(update.index, parseMeasuredItemHeight(update.height));
-            const changedItem = getColumnItem(items, update.index);
+            const changedItem = getItem(items, update.index);
             const firstChangedItem = firstChangedItemByColumn.get(changedItem.columnIndex);
             if (firstChangedItem === undefined || changedItem.index < firstChangedItem.index) {
                 firstChangedItemByColumn.set(changedItem.columnIndex, changedItem);
@@ -303,14 +302,14 @@ function buildPositioner(options: PositionerOptions) {
         nextHeightByIndex: ReadonlyMap<number, number>,
     ) {
         const columnIndex = firstChangedItem.columnIndex;
-        const columnItems = getColumnItems(columns, columnIndex);
+        const columnItems = getItem(columns, columnIndex);
         let top = firstChangedItem.top;
         for (
             let itemIndex = firstChangedItem.columnItemIndex;
             itemIndex < columnItems.length;
             itemIndex += 1
         ) {
-            const previousItem = getColumnItem(columnItems, itemIndex);
+            const previousItem = getItem(columnItems, itemIndex);
             const height = nextHeightByIndex.get(previousItem.index) ?? previousItem.height;
             const nextItem: PositionerItem = {
                 ...previousItem,
@@ -321,7 +320,7 @@ function buildPositioner(options: PositionerOptions) {
             items[previousItem.index] = nextItem;
             top += height + rowGap;
         }
-        const lastItem = getColumnItem(columnItems, columnItems.length - 1);
+        const lastItem = getItem(columnItems, columnItems.length - 1);
         columnHeights[columnIndex] = lastItem.top + lastItem.height;
     }
 
@@ -353,9 +352,10 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
     for (let index = 0; index < measuredItemCount; index += 1) {
         const item = previousPositioner.get(index);
         if (!item) {
-            throw new Error(
-                "Masonry positioner invariant violated: measured items must be contiguous.",
+            warn(
+                "MasonryRoot: measured items were not contiguous; rebuilt the layout from the contiguous prefix.",
             );
+            break;
         }
         nextPositioner.set(item.height);
     }
