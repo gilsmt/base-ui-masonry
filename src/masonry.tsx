@@ -82,7 +82,7 @@ interface PositionerUpdate {
 }
 
 interface PositionerOptions {
-    columnCount?: number;
+    columnCount?: number | undefined;
     columnWidth?: number;
     containerWidth: number;
     horizontalGap?: number;
