@@ -127,7 +127,6 @@ function findLowerBoundIndex(
 function findFirstOverlappingItemIndex(items: readonly PositionerItem[], low: number): number {
     // First item that begins at or after `low`...
     const startIndex = findLowerBoundIndex(items, (item) => item.top >= low);
-
     // ...but the item above it may still reach down across `low`.
     if (startIndex > 0) {
         const itemAbove = getItem(items, startIndex - 1);
@@ -136,6 +135,10 @@ function findFirstOverlappingItemIndex(items: readonly PositionerItem[], low: nu
         }
     }
     return startIndex;
+}
+
+function countFittingColumns(containerWidth: number, columnWidth: number, columnGap: number) {
+    return Math.floor((containerWidth + columnGap) / (columnWidth + columnGap));
 }
 
 function parsePositionerOptions({
@@ -150,12 +153,9 @@ function parsePositionerOptions({
     const normalizedColumnWidth = parsePositiveFiniteNumber(columnWidth, DEFAULT_COLUMN_WIDTH);
     const columnGap = parseFiniteNumber(horizontalGap, 0, DEFAULT_GAP);
     const rowGap = parseFiniteNumber(verticalGap, 0, columnGap);
-    const maxFittingColumnCount = Math.floor(
-        (normalizedContainerWidth + columnGap) / (MINIMUM_COLUMN_WIDTH + columnGap),
-    );
     const derivedColumnCount = Math.min(
-        Math.floor((normalizedContainerWidth + columnGap) / (normalizedColumnWidth + columnGap)),
-        maxFittingColumnCount,
+        countFittingColumns(normalizedContainerWidth, normalizedColumnWidth, columnGap),
+        countFittingColumns(normalizedContainerWidth, MINIMUM_COLUMN_WIDTH, columnGap),
         maxColumnCount,
     );
     const requestedColumnCount = parsePositiveFiniteNumber(columnCount, derivedColumnCount);
@@ -413,7 +413,6 @@ function useMeasurements(
 ) {
     const [measurements, setMeasurements] = React.useState<Measurements>(DEFAULT_MEASUREMENTS);
     const scrollElementRef = React.useRef<HTMLElement | null>(null);
-
     const animationFrame = useAnimationFrame();
 
     const sync = useStableCallback(() => {
