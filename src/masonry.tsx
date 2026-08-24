@@ -9,6 +9,7 @@ import { warn } from "@base-ui/utils/warn";
 import { useAnimationFrame } from "@base-ui/utils/useAnimationFrame";
 import { useForcedRerendering } from "@base-ui/utils/useForcedRerendering";
 import { useIsoLayoutEffect } from "@base-ui/utils/useIsoLayoutEffect";
+import { useMergedRefs } from "@base-ui/utils/useMergedRefs";
 import { useRefWithInit } from "@base-ui/utils/useRefWithInit";
 import { useStableCallback } from "@base-ui/utils/useStableCallback";
 import { flushSync } from "react-dom";
@@ -153,6 +154,7 @@ function parsePositionerOptions({
     const normalizedColumnWidth = parsePositiveFiniteNumber(columnWidth, DEFAULT_COLUMN_WIDTH);
     const columnGap = parseFiniteNumber(horizontalGap, 0, DEFAULT_GAP);
     const rowGap = parseFiniteNumber(verticalGap, 0, columnGap);
+
     const derivedColumnCount = Math.min(
         countFittingColumns(normalizedContainerWidth, normalizedColumnWidth, columnGap),
         countFittingColumns(normalizedContainerWidth, MINIMUM_COLUMN_WIDTH, columnGap),
@@ -160,6 +162,7 @@ function parsePositionerOptions({
     );
     const requestedColumnCount = parsePositiveFiniteNumber(columnCount, derivedColumnCount);
     const resolvedColumnCount = Math.max(1, Math.floor(requestedColumnCount));
+
     const resolvedColumnWidth = Math.max(
         0,
         Math.floor(
@@ -545,61 +548,10 @@ function isMasonryChildElement(
     return React.isValidElement(node) && node.type !== React.Fragment;
 }
 
-function attachForkedRef(
-    ref: React.Ref<HTMLDivElement> | undefined,
-    node: HTMLDivElement,
-): (() => void) | null {
-    if (!ref) {
-        return null;
-    }
-    if (typeof ref === "function") {
-        const cleanup = ref(node);
-        return typeof cleanup === "function" ? cleanup : () => ref(null);
-    }
-    ref.current = node;
-    return () => {
-        ref.current = null;
-    };
-}
-
-function createItemRefFork(
-    register: React.RefCallback<HTMLDivElement>,
-    childRef: React.Ref<HTMLDivElement> | undefined,
-) {
-    let detach: (() => void) | null = null;
-    const callback = (node: HTMLDivElement | null) => {
-        detach?.();
-        detach = null;
-        if (node !== null) {
-            detach = mergeCleanups(
-                attachForkedRef(register, node),
-                attachForkedRef(childRef, node),
-            );
-        }
-    };
-    return { callback, childRef };
-}
-
-function getItemStyle(columnWidth: number, item: PositionerItem | null): React.CSSProperties {
-    return {
-        position: "absolute",
-        width: columnWidth,
-        writingMode: "horizontal-tb",
-        left: 0,
-        top: 0,
-        ...(item
-            ? {
-                  contentVisibility: "auto",
-                  containIntrinsicHeight: `auto ${Math.max(1, Math.ceil(item.height))}px`,
-                  transform: `translateX(${item.left}px) translateY(${item.top}px)`,
-              }
-            : { visibility: "hidden" }),
-    };
-}
-
 interface ItemSlotProps {
     /**
-     * Bumped whenever item caches are reset. Item re-registration relies on the fork identity changing
+     * Bumped whenever item caches are reset. Item re-registration relies on the
+     * item ref callback identity changing
      */
     cacheEpoch: number;
     child: React.ReactElement<MasonryItemSlotProps>;
@@ -619,6 +571,7 @@ function areItemSlotPropsEqual(previous: ItemSlotProps, next: ItemSlotProps): bo
         previous.index === next.index &&
         previous.inert === next.inert &&
         previous.itemCount === next.itemCount &&
+        previous.register === next.register &&
         isSamePlacement(previous.item, next.item)
     );
 }
@@ -634,20 +587,37 @@ const ItemSlot = React.memo(function ItemSlot({
     register,
 }: ItemSlotProps): React.ReactElement {
     const childRef = child.props.ref;
-    const fork = React.useMemo(() => {
-        // Read deliberately so exhaustive-deps keeps the dep: bumping
-        // `cacheEpoch` must mint a new fork identity
-        void cacheEpoch;
-        return createItemRefFork((node) => register(index, node), childRef);
-    }, [cacheEpoch, childRef, index, register]);
+    const registerNode = React.useCallback(
+        (node: HTMLDivElement | null) => {
+            // Read deliberately so exhaustive-deps keeps the dep
+            void cacheEpoch;
+            register(index, node);
+        },
+        [cacheEpoch, index, register],
+    );
+    const itemRef = useMergedRefs(registerNode, childRef);
+    const style: React.CSSProperties = {
+        position: "absolute",
+        width: columnWidth,
+        writingMode: "horizontal-tb",
+        left: 0,
+        top: 0,
+        ...(item
+            ? {
+                  contentVisibility: "auto",
+                  containIntrinsicHeight: `auto ${Math.max(1, Math.ceil(item.height))}px`,
+                  transform: `translateX(${item.left}px) translateY(${item.top}px)`,
+              }
+            : { visibility: "hidden" }),
+    };
 
     return React.cloneElement(child, {
         [MasonryDataAttributes.index]: index,
-        ref: fork.callback,
+        ref: itemRef,
         "aria-posinset": index + 1,
         "aria-setsize": itemCount,
         ...(inert && { inert }),
-        style: { ...getItemStyle(columnWidth, item), ...child.props.style },
+        style: { ...style, ...child.props.style },
     });
 }, areItemSlotPropsEqual);
 
