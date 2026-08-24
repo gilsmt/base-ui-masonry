@@ -1,19 +1,22 @@
+/**
+ * @see https://github.com/rortan134/base-ui-masonry
+ */
 "use client";
 
-import { useRenderElement } from "@base-ui/react/internals/useRenderElement";
 import type { BaseUIComponentProps } from "@base-ui/react/internals/types";
+import { useRenderElement } from "@base-ui/react/internals/useRenderElement";
 import { addEventListener } from "@base-ui/utils/addEventListener";
 import { mergeCleanups } from "@base-ui/utils/mergeCleanups";
 import { ownerDocument, ownerWindow } from "@base-ui/utils/owner";
-import { warn } from "@base-ui/utils/warn";
 import { useAnimationFrame } from "@base-ui/utils/useAnimationFrame";
 import { useForcedRerendering } from "@base-ui/utils/useForcedRerendering";
 import { useIsoLayoutEffect } from "@base-ui/utils/useIsoLayoutEffect";
 import { useMergedRefs } from "@base-ui/utils/useMergedRefs";
 import { useRefWithInit } from "@base-ui/utils/useRefWithInit";
 import { useStableCallback } from "@base-ui/utils/useStableCallback";
-import { flushSync } from "react-dom";
+import { warn } from "@base-ui/utils/warn";
 import * as React from "react";
+import { flushSync } from "react-dom";
 
 const DEFAULT_COLUMN_WIDTH = 200;
 
