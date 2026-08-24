@@ -11,7 +11,6 @@ import { useForcedRerendering } from "@base-ui/utils/useForcedRerendering";
 import { useIsoLayoutEffect } from "@base-ui/utils/useIsoLayoutEffect";
 import { useRefWithInit } from "@base-ui/utils/useRefWithInit";
 import { useStableCallback } from "@base-ui/utils/useStableCallback";
-import { useTimeout } from "@base-ui/utils/useTimeout";
 import { useValueAsRef } from "@base-ui/utils/useValueAsRef";
 import { flushSync } from "react-dom";
 import * as React from "react";
@@ -25,10 +24,6 @@ const DEFAULT_ITEM_HEIGHT = 300;
 const DEFAULT_OVERSCAN = 1.5;
 
 const DEFAULT_FORWARD_OVERSCAN = 0.6;
-
-// 100 ms without scroll events ≈ scroll end
-// https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollend_event
-const SCROLL_TIMEOUT_MS = 100;
 
 const MAX_COLUMN_SKEW_RATIO = 2.5;
 
@@ -362,7 +357,7 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
     return nextPositioner;
 }
 
-/* --------------------------------- Measurement --------------------------------- */
+/* --------------------------------- Measurements --------------------------------- */
 
 function createItemResizeObserver(
     getIndexByNode: (node: Element) => number | undefined,
@@ -394,39 +389,12 @@ function createItemResizeObserver(
     return new ResizeObserver(handleResizeObserver);
 }
 
-function findVerticalScrollParent(element: HTMLElement): HTMLElement | null {
-    let current = element.parentElement;
-    const doc = ownerDocument(element);
-    const win = ownerWindow(element);
-    while (current && current !== doc.documentElement && current !== doc.body) {
-        const { overflowY } = win.getComputedStyle(current);
-        if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
-            return current;
-        }
-        current = current.parentElement;
-    }
-    return null;
-}
-
 interface Measurements {
     containerOffset: number;
     containerWidth: number;
     scrollY: number;
     windowHeight: number;
 }
-
-interface Layout {
-    containerOffset: number;
-    containerWidth: number;
-    windowHeight: number;
-}
-
-const DEFAULT_MEASUREMENTS: Measurements = {
-    containerOffset: 0,
-    containerWidth: 0,
-    scrollY: 0,
-    windowHeight: 0,
-};
 
 function areMeasurementsEqual(first: Measurements, second: Measurements) {
     return (
@@ -437,13 +405,20 @@ function areMeasurementsEqual(first: Measurements, second: Measurements) {
     );
 }
 
-function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
+const DEFAULT_MEASUREMENTS: Measurements = {
+    containerOffset: 0,
+    containerWidth: 0,
+    scrollY: 0,
+    windowHeight: 0,
+};
+
+function useMeasurements(
+    containerRef: React.RefObject<HTMLDivElement | null>,
+    scrollElement: HTMLElement | null,
+) {
     const [measurements, setMeasurements] = React.useState<Measurements>(DEFAULT_MEASUREMENTS);
-    const isScrollingRef = React.useRef(false);
-    const shouldReadLayoutRef = React.useRef(true);
     const scrollElementRef = React.useRef<HTMLElement | null>(null);
 
-    const scrollYTimeout = useTimeout();
     const animationFrame = useAnimationFrame();
 
     const sync = useStableCallback(() => {
@@ -452,39 +427,28 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
             return;
         }
 
-        const shouldReadLayout = shouldReadLayoutRef.current;
-        shouldReadLayoutRef.current = false;
-
         const scrollElement = scrollElementRef.current;
         const win = ownerWindow(container);
         const scrollY = scrollElement ? scrollElement.scrollTop : win.scrollY;
 
-        let layout: Layout | null = null;
-        if (shouldReadLayout) {
-            const containerRect = container.getBoundingClientRect();
-            layout = scrollElement
-                ? {
-                      containerOffset:
-                          containerRect.top -
-                          scrollElement.getBoundingClientRect().top +
-                          scrollY -
-                          (parseFloat(win.getComputedStyle(scrollElement).borderTopWidth) || 0),
-                      containerWidth: container.clientWidth,
-                      windowHeight: scrollElement.clientHeight,
-                  }
-                : {
-                      containerOffset: containerRect.top + scrollY,
-                      containerWidth: container.clientWidth,
-                      windowHeight: ownerDocument(container).documentElement.clientHeight,
-                  };
-        }
-
-        const next: Measurements = {
-            containerOffset: layout?.containerOffset ?? measurements.containerOffset,
-            containerWidth: layout?.containerWidth ?? measurements.containerWidth,
-            scrollY,
-            windowHeight: layout?.windowHeight ?? measurements.windowHeight,
-        };
+        const containerRect = container.getBoundingClientRect();
+        const next: Measurements = scrollElement
+            ? {
+                  containerOffset:
+                      containerRect.top -
+                      scrollElement.getBoundingClientRect().top +
+                      scrollY -
+                      (parseFloat(win.getComputedStyle(scrollElement).borderTopWidth) || 0),
+                  containerWidth: container.clientWidth,
+                  scrollY,
+                  windowHeight: scrollElement.clientHeight,
+              }
+            : {
+                  containerOffset: containerRect.top + scrollY,
+                  containerWidth: container.clientWidth,
+                  scrollY,
+                  windowHeight: ownerDocument(container).documentElement.clientHeight,
+              };
 
         if (areMeasurementsEqual(measurements, next)) {
             return;
@@ -496,27 +460,7 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
     });
 
     const scheduleLayoutSync = useStableCallback(() => {
-        shouldReadLayoutRef.current = true;
         animationFrame.request(sync);
-    });
-
-    const finishScrolling = useStableCallback(() => {
-        isScrollingRef.current = false;
-        scheduleLayoutSync();
-    });
-
-    const handleScroll = useStableCallback(() => {
-        const wasScrolling = isScrollingRef.current;
-        isScrollingRef.current = true;
-
-        if (wasScrolling) {
-            animationFrame.request(sync);
-        } else {
-            // First event of a gesture: geometry may have changed since the
-            // previous scroll ended, so take a full reading.
-            scheduleLayoutSync();
-        }
-        scrollYTimeout.start(SCROLL_TIMEOUT_MS, finishScrolling);
     });
 
     useIsoLayoutEffect(() => {
@@ -526,7 +470,6 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
         }
 
         const win = ownerWindow(container);
-        const scrollElement = findVerticalScrollParent(container);
         scrollElementRef.current = scrollElement;
 
         scheduleLayoutSync();
@@ -541,14 +484,14 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
             }
             // Shifts originating outside the container (e.g. siblings growing)
             // move it without resizing it, leaving `containerOffset` stale.
-            // Observe the full `offsetParent` chain above the container: a shift
-            // displacing it almost always resizes one of these ancestors.
+            // Observe the positioned ancestors above the container — a shift
+            // displacing it almost always resizes one of them — with the
+            // document roots as baselines for containers with no positioned
+            // ancestors (hidden or fixed-positioned at mount).
+            const doc = ownerDocument(container);
+            resizeObserver.observe(doc.body);
+            resizeObserver.observe(doc.documentElement);
             let offsetAncestor = container.offsetParent as HTMLElement | null;
-            if (!offsetAncestor) {
-                // Not laid out yet (hidden) or fixed-positioned: keep a root sentinel
-                // so late layout changes are still reported.
-                offsetAncestor = ownerDocument(container).scrollingElement as HTMLElement | null;
-            }
             while (offsetAncestor) {
                 resizeObserver.observe(offsetAncestor);
                 // Terminates at `<body>`/`<html>`, whose `offsetParent` is `null`.
@@ -557,7 +500,7 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
         }
 
         return mergeCleanups(
-            addEventListener(scrollElement ?? win, "scroll", handleScroll, { passive: true }),
+            addEventListener(scrollElement ?? win, "scroll", scheduleLayoutSync, { passive: true }),
             addEventListener(win, "resize", scheduleLayoutSync),
             addEventListener(win, "orientationchange", scheduleLayoutSync),
             win.visualViewport
@@ -566,10 +509,9 @@ function useMeasurements(containerRef: React.RefObject<HTMLDivElement | null>) {
             resizeObserver ? () => resizeObserver.disconnect() : null,
             () => {
                 scrollElementRef.current = null;
-                isScrollingRef.current = false;
             },
         );
-    }, [containerRef, handleScroll, scheduleLayoutSync]);
+    }, [containerRef, scheduleLayoutSync, scrollElement]);
 
     return {
         containerWidth: measurements.containerWidth,
@@ -782,6 +724,11 @@ export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRoo
      * @default 1.5
      */
     overscan?: number;
+    /**
+     * Scroll container whose scroll position drives windowing. Accepts an element or a ref to one.
+     * @default window
+     */
+    container?: HTMLElement | null | React.RefObject<HTMLElement | null>;
 }
 
 /**
@@ -797,13 +744,24 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         itemHeight = DEFAULT_ITEM_HEIGHT,
         maxColumnCount: maxColumnCountProp,
         overscan = DEFAULT_OVERSCAN,
+        container,
         className,
         render,
         style,
         ...elementProps
     } = componentProps;
+
     const containerRef = React.useRef<HTMLDivElement | null>(null);
-    const { containerWidth, scrollTop, windowHeight } = useMeasurements(containerRef);
+    const scrollElement =
+        container != null && "current" in container
+            ? container.current
+            : (container as HTMLElement | null);
+    const { containerWidth, scrollTop, windowHeight } = useMeasurements(
+        containerRef,
+        scrollElement,
+    );
+    const rerender = useForcedRerendering();
+    const animationFrame = useAnimationFrame();
 
     const { horizontalGap, verticalGap } = parseGapDirectionalValues(gap);
     const normalizedItemHeight = parseFiniteNumber(itemHeight, 1, DEFAULT_ITEM_HEIGHT);
@@ -822,8 +780,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
 
     const positionerRef = useRefWithInit(() => buildPositioner(latestOptions));
     const committedOptionsRef = useRefWithInit(() => latestOptions);
-    const rerender = useForcedRerendering();
-    const animationFrame = useAnimationFrame();
 
     const itemRegistrationCacheRef = useRefWithInit<ItemRegistrationCache>(() => ({
         callbacks: new Map(),
