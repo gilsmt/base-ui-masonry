@@ -276,12 +276,6 @@ function buildPositioner(options: PositionerOptions) {
         const firstChangedItemByColumn = new Map<number, PositionerItem>();
 
         for (const update of updates) {
-            if (!(update.index >= 0 && update.index < items.length)) {
-                warn(
-                    `MasonryRoot: ignoring measurement update for index ${update.index}, which is not placed (${items.length} placed).`,
-                );
-                continue;
-            }
             nextHeightByIndex.set(update.index, parseMeasuredItemHeight(update.height));
             const changedItem = getItem(items, update.index);
             const firstChangedItem = firstChangedItemByColumn.get(changedItem.columnIndex);
@@ -346,14 +340,7 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
     const nextPositioner = buildPositioner(options);
     const measuredItemCount = previousPositioner.size();
     for (let index = 0; index < measuredItemCount; index += 1) {
-        const item = previousPositioner.get(index);
-        if (!item) {
-            warn(
-                "MasonryRoot: measured items were not contiguous; rebuilt the layout from the contiguous prefix.",
-            );
-            break;
-        }
-        nextPositioner.set(item.height);
+        nextPositioner.set(previousPositioner.get(index)!.height);
     }
     return nextPositioner;
 }
@@ -482,19 +469,15 @@ function useMeasurements(
             if (scrollElement) {
                 resizeObserver.observe(scrollElement);
             }
-            // Shifts originating outside the container (e.g. siblings growing)
-            // move it without resizing it, leaving `containerOffset` stale.
-            // Observe the positioned ancestors above the container — a shift
-            // displacing it almost always resizes one of them — with the
-            // document roots as baselines for containers with no positioned
-            // ancestors (hidden or fixed-positioned at mount).
+            // Shifts above the container can move it without resizing it,
+            // leaving `containerOffset` stale; observe its positioned
+            // ancestors so such shifts still trigger a resync.
             const doc = ownerDocument(container);
             resizeObserver.observe(doc.body);
             resizeObserver.observe(doc.documentElement);
             let offsetAncestor = container.offsetParent as HTMLElement | null;
             while (offsetAncestor) {
                 resizeObserver.observe(offsetAncestor);
-                // Terminates at `<body>`/`<html>`, whose `offsetParent` is `null`.
                 offsetAncestor = offsetAncestor.offsetParent as HTMLElement | null;
             }
         }
