@@ -1,6 +1,3 @@
-/**
- * @see https://github.com/rortan134/base-ui-masonry
- */
 "use client";
 
 import type { BaseUIComponentProps } from "@base-ui/react/internals/types";
