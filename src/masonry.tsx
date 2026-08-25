@@ -364,7 +364,7 @@ function useItemResizeObserver(
                 const blockSize = entry.borderBoxSize?.[0]?.blockSize;
                 const height =
                     typeof blockSize === "number" && Number.isFinite(blockSize)
-                        ? Math.round(blockSize)
+                        ? blockSize
                         : target.offsetHeight;
                 callbackFn(attributeIndex, target, height);
             }
