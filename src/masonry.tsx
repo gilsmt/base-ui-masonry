@@ -28,8 +28,6 @@ const DEFAULT_OVERSCAN = 1.5;
 
 const DEFAULT_FORWARD_OVERSCAN = 0.6;
 
-const MAX_COLUMN_SKEW_RATIO = 2.5;
-
 const MINIMUM_COLUMN_WIDTH = 1;
 
 const MasonryDataAttributes = {
@@ -114,7 +112,6 @@ function findLowerBoundIndex(
     items: readonly PositionerItem[],
     predicate: (item: PositionerItem) => boolean,
 ): number {
-    // binary search
     let start = 0;
     let end = items.length;
     while (start < end) {
@@ -238,17 +235,9 @@ function buildPositioner(options: PositionerOptions) {
         }
     }
 
-    function pickPlacementColumn(itemHeight: number) {
-        const roundRobinColumn = items.length % columnCount;
-        const shortest = findShortestColumn(columnHeights);
-        const roundRobinColumnHeight = getItem(columnHeights, roundRobinColumn) + itemHeight;
-        const maxAllowedHeight = shortest.height + itemHeight * MAX_COLUMN_SKEW_RATIO;
-        return roundRobinColumnHeight <= maxAllowedHeight ? roundRobinColumn : shortest.index;
-    }
-
     function set(height: number) {
         const itemHeight = parseMeasuredItemHeight(height);
-        const columnIndex = pickPlacementColumn(itemHeight);
+        const columnIndex = findShortestColumn(columnHeights).index;
         const columnItems = getItem(columns, columnIndex);
         const top = columnItems.length > 0 ? getItem(columnHeights, columnIndex) + rowGap : 0;
         const item: PositionerItem = {
