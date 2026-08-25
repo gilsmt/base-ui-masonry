@@ -212,12 +212,13 @@ function buildPositioner(options: PositionerOptions) {
         const remainingItemCount = Math.max(0, itemCount - items.length);
         const remainingRowCount = Math.ceil(remainingItemCount / columnCount);
         const leadingGap = items.length > 0 && remainingRowCount > 0 ? rowGap : 0;
-        return (
-            tallestColumn +
+        const meanColumnHeight =
+            columnHeights.reduce((sum, columnHeight) => sum + columnHeight, 0) / columnCount;
+        const remainingHeight =
             leadingGap +
             remainingRowCount * defaultItemHeight +
-            Math.max(0, remainingRowCount - 1) * rowGap
-        );
+            Math.max(0, remainingRowCount - 1) * rowGap;
+        return Math.max(tallestColumn, meanColumnHeight + remainingHeight);
     }
 
     function get(index: number) {
@@ -402,10 +403,9 @@ const DEFAULT_MEASUREMENTS: Measurements = {
 
 function useMeasurements(
     containerRef: React.RefObject<HTMLDivElement | null>,
-    scrollElement: HTMLElement | null,
+    scrollElementOrRef: HTMLElement | undefined | null | React.RefObject<HTMLElement | null>,
 ) {
     const [measurements, setMeasurements] = React.useState<Measurements>(DEFAULT_MEASUREMENTS);
-    const scrollElementRef = React.useRef<HTMLElement | null>(null);
     const animationFrame = useAnimationFrame();
 
     const sync = useStableCallback(() => {
@@ -414,7 +414,10 @@ function useMeasurements(
             return;
         }
 
-        const scrollElement = scrollElementRef.current;
+        const scrollElement =
+            scrollElementOrRef != null && "current" in scrollElementOrRef
+                ? scrollElementOrRef.current
+                : (scrollElementOrRef as HTMLElement | null);
         const win = ownerWindow(container);
         const scrollY = scrollElement ? scrollElement.scrollTop : win.scrollY;
 
@@ -425,7 +428,7 @@ function useMeasurements(
                       containerRect.top -
                       scrollElement.getBoundingClientRect().top +
                       scrollY -
-                      (parseFloat(win.getComputedStyle(scrollElement).borderTopWidth) || 0),
+                      scrollElement.clientTop,
                   containerWidth: container.clientWidth,
                   scrollY,
                   windowHeight: scrollElement.clientHeight,
@@ -456,8 +459,10 @@ function useMeasurements(
             return;
         }
 
-        const win = ownerWindow(container);
-        scrollElementRef.current = scrollElement;
+        const scrollElement =
+            scrollElementOrRef != null && "current" in scrollElementOrRef
+                ? scrollElementOrRef.current
+                : (scrollElementOrRef as HTMLElement | null);
 
         scheduleLayoutSync();
 
@@ -482,6 +487,7 @@ function useMeasurements(
             }
         }
 
+        const win = ownerWindow(container);
         return mergeCleanups(
             addEventListener(scrollElement ?? win, "scroll", scheduleLayoutSync, { passive: true }),
             addEventListener(win, "resize", scheduleLayoutSync),
@@ -490,11 +496,8 @@ function useMeasurements(
                 ? addEventListener(win.visualViewport, "resize", scheduleLayoutSync)
                 : null,
             resizeObserver ? () => resizeObserver.disconnect() : null,
-            () => {
-                scrollElementRef.current = null;
-            },
         );
-    }, [containerRef, scheduleLayoutSync, scrollElement]);
+    }, [containerRef, scheduleLayoutSync, scrollElementOrRef]);
 
     return {
         containerWidth: measurements.containerWidth,
@@ -724,14 +727,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     } = componentProps;
 
     const containerRef = React.useRef<HTMLDivElement | null>(null);
-    const scrollElement =
-        container != null && "current" in container
-            ? container.current
-            : (container as HTMLElement | null);
-    const { containerWidth, scrollTop, windowHeight } = useMeasurements(
-        containerRef,
-        scrollElement,
-    );
+    const { containerWidth, scrollTop, windowHeight } = useMeasurements(containerRef, container);
     const rerender = useForcedRerendering();
     const animationFrame = useAnimationFrame();
 
