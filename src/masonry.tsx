@@ -45,6 +45,15 @@ const MasonryDataAttributes = {
 
 /* ------------------------------------ Shared utils ----------------------------------- */
 
+function getNodeDataIndex(node: Element): number | null {
+    const raw = node.getAttribute(MasonryDataAttributes.index);
+    if (raw === null) {
+        return null;
+    }
+    const index = Number(raw);
+    return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
 function parseGapDirectionalValues(gap: number | { horizontal: number; vertical: number }) {
     if (gap && typeof gap === "object") {
         return {
@@ -337,34 +346,36 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
 
 /* --------------------------------- Measurements --------------------------------- */
 
-function createItemResizeObserver(
-    getIndexByNode: (node: Element) => number | undefined,
-    getRegisteredNode: (index: number) => Element | undefined,
-    onMeasurementUpdate: (index: number, node: HTMLElement, height: number) => void,
+function useItemResizeObserver(
+    callbackFn: (index: number, node: HTMLElement, height: number) => void,
 ): ResizeObserver | null {
-    if (typeof ResizeObserver !== "function") {
-        return null;
-    }
-
-    function handleResizeObserver(entries: ResizeObserverEntry[]) {
-        for (const entry of entries) {
-            const target = entry.target as HTMLElement;
-            const entryIndex = getIndexByNode(target);
-            if (entryIndex === undefined || getRegisteredNode(entryIndex) !== target) {
-                continue;
-            }
-
-            const blockSize = entry.borderBoxSize?.[0]?.blockSize;
-            const height =
-                typeof blockSize === "number" && Number.isFinite(blockSize)
-                    ? Math.round(blockSize)
-                    : target.offsetHeight;
-
-            onMeasurementUpdate(entryIndex, target, height);
+    const resizeObserver = useRefWithInit(() => {
+        if (typeof ResizeObserver !== "function") {
+            return null;
         }
-    }
 
-    return new ResizeObserver(handleResizeObserver);
+        function handleResizeObserver(entries: ResizeObserverEntry[]) {
+            for (const entry of entries) {
+                const target = entry.target as HTMLElement;
+                const attributeIndex = getNodeDataIndex(target);
+                if (attributeIndex === null) {
+                    continue;
+                }
+                const blockSize = entry.borderBoxSize?.[0]?.blockSize;
+                const height =
+                    typeof blockSize === "number" && Number.isFinite(blockSize)
+                        ? Math.round(blockSize)
+                        : target.offsetHeight;
+                callbackFn(attributeIndex, target, height);
+            }
+        }
+
+        return new ResizeObserver(handleResizeObserver);
+    }).current;
+
+    useIsoLayoutEffect(() => () => resizeObserver?.disconnect(), [resizeObserver]);
+
+    return resizeObserver;
 }
 
 interface Measurements {
@@ -481,7 +492,7 @@ function useMeasurements(
     };
 }
 
-/* -------------------- Binding: registries, caches, and components -------------------- */
+/* ----------------------- Binding: slots and measurement flow ----------------------- */
 
 interface MasonryItemSlotProps
     extends React.HTMLAttributes<HTMLDivElement>, React.RefAttributes<HTMLDivElement> {
@@ -497,13 +508,15 @@ interface PendingItemMeasurement {
     node: HTMLElement;
 }
 
-function isSamePlacement(a: PositionerItem | null, b: PositionerItem | null) {
-    if (a === b) {
-        return true;
-    }
-    return (
-        a !== null && b !== null && a.left === b.left && a.top === b.top && a.height === b.height
-    );
+interface ItemSlotProps {
+    child: React.ReactElement<MasonryItemSlotProps>;
+    columnWidth: number;
+    index: number;
+    inert: boolean;
+    itemCount: number;
+    item: PositionerItem | null;
+    register: (index: number, node: HTMLDivElement) => () => void;
+    resetKey: number;
 }
 
 function isMasonryChildElement(
@@ -512,36 +525,27 @@ function isMasonryChildElement(
     return React.isValidElement(node) && node.type !== React.Fragment;
 }
 
-interface ItemSlotProps {
-    /**
-     * Bumped whenever item caches are reset. Item re-registration relies on the
-     * item ref callback identity changing
-     */
-    cacheEpoch: number;
-    child: React.ReactElement<MasonryItemSlotProps>;
-    columnWidth: number;
-    index: number;
-    inert: boolean;
-    itemCount: number;
-    item: PositionerItem | null;
-    register: (index: number, node: HTMLDivElement | null) => void;
+function isSamePlacement(a: PositionerItem | null, b: PositionerItem | null) {
+    if (a === null || b === null) {
+        return a === b;
+    }
+    return a.left === b.left && a.top === b.top && a.height === b.height;
 }
 
 function areItemSlotPropsEqual(previous: ItemSlotProps, next: ItemSlotProps): boolean {
     return (
-        previous.cacheEpoch === next.cacheEpoch &&
+        isSamePlacement(previous.item, next.item) &&
         previous.child === next.child &&
         previous.columnWidth === next.columnWidth &&
         previous.index === next.index &&
         previous.inert === next.inert &&
         previous.itemCount === next.itemCount &&
         previous.register === next.register &&
-        isSamePlacement(previous.item, next.item)
+        previous.resetKey === next.resetKey
     );
 }
 
 const ItemSlot = React.memo(function ItemSlot({
-    cacheEpoch,
     child,
     columnWidth,
     index,
@@ -549,17 +553,17 @@ const ItemSlot = React.memo(function ItemSlot({
     itemCount,
     item,
     register,
+    resetKey,
 }: ItemSlotProps): React.ReactElement {
-    const childRef = child.props.ref;
     const registerNode = React.useCallback(
-        (node: HTMLDivElement | null) => {
-            // Read deliberately so exhaustive-deps keeps the dep
-            void cacheEpoch;
-            register(index, node);
+        (node: HTMLDivElement) => {
+            void resetKey; // read deliberately so callback keeps the dep
+            return register(index, node);
         },
-        [cacheEpoch, index, register],
+        [index, register, resetKey],
     );
-    const itemRef = useMergedRefs(registerNode, childRef);
+    const mergedRefs = useMergedRefs(registerNode, child.props.ref);
+
     const style: React.CSSProperties = {
         position: "absolute",
         width: columnWidth,
@@ -569,7 +573,7 @@ const ItemSlot = React.memo(function ItemSlot({
         ...(item
             ? {
                   contentVisibility: "auto",
-                  containIntrinsicHeight: `auto ${Math.max(1, Math.ceil(item.height))}px`,
+                  containIntrinsicHeight: `auto ${item.height}px`,
                   transform: `translateX(${item.left}px) translateY(${item.top}px)`,
               }
             : { visibility: "hidden" }),
@@ -577,7 +581,7 @@ const ItemSlot = React.memo(function ItemSlot({
 
     return React.cloneElement(child, {
         [MasonryDataAttributes.index]: index,
-        ref: itemRef,
+        ref: mergedRefs,
         "aria-posinset": index + 1,
         "aria-setsize": itemCount,
         ...(inert && { inert }),
@@ -587,33 +591,28 @@ const ItemSlot = React.memo(function ItemSlot({
 
 function commitPendingMeasurements(
     positioner: Positioner,
-    registeredNodes: ReadonlyMap<number, HTMLDivElement>,
     pendingMeasurements: ReadonlyMap<number, PendingItemMeasurement>,
 ): boolean {
-    const measuredItemCount = positioner.size();
     const updates: PositionerUpdate[] = [];
     let didChange = false;
 
-    for (let index = measuredItemCount; ; index += 1) {
-        const node = registeredNodes.get(index);
-        if (!node) {
-            break;
-        }
-
-        const measurement = pendingMeasurements.get(index);
-        positioner.set(
-            measurement && measurement.node === node ? measurement.height : node.offsetHeight,
-        );
-        didChange = true;
-    }
-
-    for (const [measurementIndex, measurement] of pendingMeasurements) {
-        const item = positioner.get(measurementIndex);
-        if (item === undefined || registeredNodes.get(measurementIndex) !== measurement.node) {
+    const indices = Array.from(pendingMeasurements.keys()).sort((a, b) => a - b);
+    for (const index of indices) {
+        const measurement = pendingMeasurements.get(index)!;
+        if (!measurement.node.isConnected || getNodeDataIndex(measurement.node) !== index) {
             continue;
         }
-        if (measurement.height !== item.height) {
-            updates.push({ height: measurement.height, index: measurementIndex });
+
+        const item = positioner.get(index);
+        if (item === undefined) {
+            if (index !== positioner.size()) {
+                continue;
+            }
+            positioner.set(measurement.height);
+            didChange = true;
+        } else if (item.height !== measurement.height) {
+            updates.push({ height: measurement.height, index });
+            didChange = true;
         }
     }
 
@@ -688,7 +687,7 @@ export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRoo
  */
 export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElement {
     const {
-        children: childrenProp,
+        children,
         columnCount,
         columnWidth = DEFAULT_COLUMN_WIDTH,
         gap = DEFAULT_GAP,
@@ -722,21 +721,18 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         [columnCount, columnWidth, containerWidth, horizontalGap, maxColumnCount, verticalGap],
     );
 
-    const committedItemKeysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
+    const resetCountRef = useRefWithInit(() => ({ value: 0 })); // Bumped on layout reset so every mounted slot re-reports its measurement
     const positionerRef = useRefWithInit(() => buildPositioner(latestOptions));
-    const committedOptionsRef = useRefWithInit(() => latestOptions);
     const committedResolvedOptionsRef = useRefWithInit(() => parsePositionerOptions(latestOptions));
+    const committedItemKeysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
     const pendingMeasurementsRef = useRefWithInit(() => new Map<number, PendingItemMeasurement>());
-    const registeredNodesRef = useRefWithInit(() => new Map<number, HTMLDivElement>());
-    const cacheEpochRef = useRefWithInit(() => ({ value: 0 }));
-    const cacheEpoch = cacheEpochRef.current.value;
     const positioner = positionerRef.current;
 
     // React.Children.toArray is opaque to the React Compiler,
     // so memoize manually to keep both arrays stable
     const validChildren = React.useMemo(
-        () => React.Children.toArray(childrenProp).filter(isMasonryChildElement),
-        [childrenProp],
+        () => React.Children.toArray(children).filter(isMasonryChildElement),
+        [children],
     );
     const currentItemKeys = React.useMemo(
         () => validChildren.map((child) => child.key),
@@ -745,16 +741,15 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const itemCount = validChildren.length;
 
     const commitQueuedMeasurements = useStableCallback(() => {
-        const pendingMeasurements = pendingMeasurementsRef.current;
-        pendingMeasurementsRef.current = new Map();
-
-        const didChange = commitPendingMeasurements(
+        const didCommit = commitPendingMeasurements(
             positionerRef.current,
-            registeredNodesRef.current,
-            pendingMeasurements,
+            pendingMeasurementsRef.current,
         );
+        if (pendingMeasurementsRef.current.size > 0) {
+            pendingMeasurementsRef.current = new Map();
+        }
 
-        if (didChange) {
+        if (didCommit) {
             flushSync(() => {
                 rerender();
             });
@@ -771,61 +766,18 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         },
     );
 
-    const itemIndexByNode = useRefWithInit(() => new WeakMap<Element, number>());
+    const resizeObserver = useItemResizeObserver(queueMeasurementCommit);
 
-    const resizeObserver = useRefWithInit(() =>
-        createItemResizeObserver(
-            (node) => itemIndexByNode.current.get(node),
-            (index) => registeredNodesRef.current.get(index),
-            queueMeasurementCommit,
-        ),
-    ).current;
-
-    useIsoLayoutEffect(() => () => resizeObserver?.disconnect(), [resizeObserver]);
-
-    const unregisterItemNode = (node: HTMLDivElement) => {
-        resizeObserver?.unobserve(node);
-        itemIndexByNode.current.delete(node);
-    };
-
-    const registerItemNode = useStableCallback((index: number, node: HTMLDivElement | null) => {
-        const registeredNodes = registeredNodesRef.current;
-        const previousNode = registeredNodes.get(index);
-        if (node === null) {
-            if (previousNode) {
-                unregisterItemNode(previousNode);
-                registeredNodes.delete(index);
-                const pendingMeasurement = pendingMeasurementsRef.current.get(index);
-                if (pendingMeasurement?.node === previousNode) {
-                    pendingMeasurementsRef.current.delete(index);
-                }
-            }
-            return;
-        }
-
-        // The same node can re-attach without having unmounted; only re-measure
-        // when the positioner was rebuilt and lost this index.
-        if (previousNode === node && positionerRef.current.get(index) !== undefined) {
-            return;
-        }
-        if (previousNode && previousNode !== node) {
-            unregisterItemNode(previousNode);
-        }
+    const registerItemNode = useStableCallback((index: number, node: HTMLDivElement) => {
         resizeObserver?.observe(node);
-        registeredNodes.set(index, node);
-        itemIndexByNode.current.set(node, index);
         queueMeasurementCommit(index, node, node.offsetHeight);
-    });
-
-    const resetItemCaches = useStableCallback(() => {
-        const registeredNodes = registeredNodesRef.current;
-        for (const node of registeredNodes.values()) {
+        return () => {
             resizeObserver?.unobserve(node);
-            itemIndexByNode.current.delete(node);
-        }
-        registeredNodes.clear();
-        pendingMeasurementsRef.current.clear();
-        cacheEpochRef.current.value += 1;
+            const pendingMeasurement = pendingMeasurementsRef.current.get(index);
+            if (pendingMeasurement?.node === node) {
+                pendingMeasurementsRef.current.delete(index);
+            }
+        };
     });
 
     useIsoLayoutEffect(() => {
@@ -838,28 +790,45 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
 
         const shouldRebuildPositioner =
             !shouldResetPositioner &&
-            committedOptionsRef.current !== latestOptions &&
             !areResolvedOptionsEqual(committedResolvedOptions, nextResolvedOptions);
 
         committedItemKeysRef.current = currentItemKeys;
-        committedOptionsRef.current = latestOptions;
         committedResolvedOptionsRef.current = nextResolvedOptions;
 
         if (shouldResetPositioner || shouldRebuildPositioner) {
+            let nextPositioner: Positioner;
             if (shouldResetPositioner) {
                 warn(
-                    "MasonryRoot: item keys changed by more than appending (reorder, insertion, or removal), so all layout measurements were reset. Provide stable `key`s and limit updates to appending items.",
+                    "MasonryRoot: item keys changed by more than appending (reorder, insertion, or removal). The layout was rebuilt from mounted items; provide stable `key`s to keep reordering cheap.",
                 );
-                resetItemCaches();
+                pendingMeasurementsRef.current.clear();
+                resetCountRef.current.value += 1;
+                nextPositioner = buildPositioner(latestOptions);
+                const container = containerRef.current;
+                if (container) {
+                    const nodeByIndex = new Map<number, HTMLElement>();
+                    for (const child of Array.from(container.children)) {
+                        const childIndex = getNodeDataIndex(child);
+                        if (childIndex !== null && !nodeByIndex.has(childIndex)) {
+                            nodeByIndex.set(childIndex, child as HTMLElement);
+                        }
+                    }
+                    for (let index = 0; index < itemCount; index += 1) {
+                        const node = nodeByIndex.get(index);
+                        if (!node) {
+                            break;
+                        }
+                        nextPositioner.set(node.offsetHeight);
+                    }
+                }
+            } else {
+                nextPositioner = rebuildPositioner(positionerRef.current, latestOptions);
             }
 
-            positionerRef.current = shouldResetPositioner
-                ? buildPositioner(latestOptions)
-                : rebuildPositioner(positionerRef.current, latestOptions);
-
+            positionerRef.current = nextPositioner;
             rerender();
         }
-    }, [currentItemKeys, latestOptions, rerender, resetItemCaches]);
+    }, [currentItemKeys, itemCount, latestOptions, rerender]);
 
     const firstUnmeasuredIndex = positioner.size();
     const shortestColumnSize = positioner.shortestColumn();
@@ -887,7 +856,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         positionedChildren.push(
             <ItemSlot
                 key={child.key}
-                cacheEpoch={cacheEpoch}
                 child={child}
                 columnWidth={positioner.columnWidth}
                 index={index}
@@ -895,6 +863,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
                 itemCount={itemCount}
                 item={item}
                 register={registerItemNode}
+                resetKey={resetCountRef.current.value}
             />,
         );
     };
