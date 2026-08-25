@@ -392,7 +392,7 @@ const DEFAULT_MEASUREMENTS: Measurements = {
 
 function useMeasurements(
     containerRef: React.RefObject<HTMLDivElement | null>,
-    scrollElementOrRef: HTMLElement | undefined | null | React.RefObject<HTMLElement | null>,
+    scrollElement: HTMLElement | null,
 ) {
     const [measurements, setMeasurements] = React.useState<Measurements>(DEFAULT_MEASUREMENTS);
     const animationFrame = useAnimationFrame();
@@ -403,31 +403,22 @@ function useMeasurements(
             return;
         }
 
-        const scrollElement =
-            scrollElementOrRef != null && "current" in scrollElementOrRef
-                ? scrollElementOrRef.current
-                : (scrollElementOrRef as HTMLElement | null);
         const win = ownerWindow(container);
         const scrollY = scrollElement ? scrollElement.scrollTop : win.scrollY;
 
-        const containerRect = container.getBoundingClientRect();
-        const next: Measurements = scrollElement
-            ? {
-                  containerOffset:
-                      containerRect.top -
-                      scrollElement.getBoundingClientRect().top +
-                      scrollY -
-                      scrollElement.clientTop,
-                  containerWidth: container.clientWidth,
-                  scrollY,
-                  windowHeight: scrollElement.clientHeight,
-              }
-            : {
-                  containerOffset: containerRect.top + scrollY,
-                  containerWidth: container.clientWidth,
-                  scrollY,
-                  windowHeight: ownerDocument(container).documentElement.clientHeight,
-              };
+        const scrollOriginOffset = scrollElement
+            ? scrollElement.getBoundingClientRect().top + scrollElement.clientTop
+            : 0;
+
+        const rootNodeRect = container.getBoundingClientRect();
+        const next: Measurements = {
+            containerOffset: rootNodeRect.top - scrollOriginOffset + scrollY,
+            containerWidth: container.clientWidth,
+            scrollY,
+            windowHeight: scrollElement
+                ? scrollElement.clientHeight
+                : ownerDocument(container).documentElement.clientHeight,
+        };
 
         if (areMeasurementsEqual(measurements, next)) {
             return;
@@ -447,11 +438,6 @@ function useMeasurements(
         if (!container) {
             return;
         }
-
-        const scrollElement =
-            scrollElementOrRef != null && "current" in scrollElementOrRef
-                ? scrollElementOrRef.current
-                : (scrollElementOrRef as HTMLElement | null);
 
         scheduleLayoutSync();
 
@@ -486,7 +472,7 @@ function useMeasurements(
                 : null,
             resizeObserver ? () => resizeObserver.disconnect() : null,
         );
-    }, [containerRef, scheduleLayoutSync, scrollElementOrRef]);
+    }, [containerRef, scheduleLayoutSync, scrollElement]);
 
     return {
         containerWidth: measurements.containerWidth,
@@ -689,10 +675,11 @@ export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRoo
      */
     overscan?: number;
     /**
-     * Scroll container whose scroll position drives windowing. Accepts an element or a ref to one.
-     * @default window
+     * Scroll container element whose scroll position drives windowing. Pass the
+     * element that actually scrolls when the masonry sits inside an overflow
+     * container. @default window
      */
-    container?: HTMLElement | null | React.RefObject<HTMLElement | null>;
+    container?: HTMLElement | null;
 }
 
 /**
@@ -708,7 +695,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         itemHeight = DEFAULT_ITEM_HEIGHT,
         maxColumnCount: maxColumnCountProp,
         overscan = DEFAULT_OVERSCAN,
-        container,
+        container = null,
         className,
         render,
         style,
