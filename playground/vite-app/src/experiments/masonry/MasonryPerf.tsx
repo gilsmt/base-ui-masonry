@@ -17,7 +17,7 @@ function makeItems(count: number, seed = 1) {
   }));
 }
 
-const PRESETS = [100, 500, 2000, 5000, 10000] as const;
+const PRESETS = [100, 500, 2000, 5000] as const;
 
 export default function MasonryPerf() {
   const [count, setCount] = React.useState<number>(500);
@@ -30,16 +30,6 @@ export default function MasonryPerf() {
 
   return (
     <div className={styles.container}>
-      <h1>Masonry — virtualization benchmark</h1>
-      <p>
-        Mounts <code className={styles.kbd}>MasonryRoot</code> with N items and measures{' '}
-        <em>mount → DOM settled</em> (quiet-window, same logic as Base UI&apos;s{' '}
-        <code className={styles.kbd}>perf/benchmark.tsx</code>). Use it to compare the refactor
-        against main: keep props identical and compare Run-20 averages. For commit-level profiling,
-        use <code className={styles.kbd}>pnpm build:profile</code> and Chrome Performance → React
-        tracks.
-      </p>
-
       <div className={styles.controls}>
         <div className={styles.controlsRow}>
           <div className="flex flex-wrap gap-2">
@@ -133,19 +123,6 @@ export default function MasonryPerf() {
           overscan={overscan}
         />
       </PerformanceBenchmark>
-
-      <section className="rounded-lg border border-gray-200 bg-white p-4 text-sm leading-6 mt-6">
-        <h2 className="font-semibold">How to interpret</h2>
-        <ul className="list-disc pl-5 mt-2 space-y-1 text-gray-700">
-          <li>
-            <strong>Run 20 / 50</strong> logs an array of durations + average/stddev; with{' '}
-            <em>Remove outliers</em> it uses IQR filtering.
-          </li>
-          <li>Masonry is fully virtualized — DOM node count stays ~ overscan window regardless of N. Expect near-flat timings up to 10k items.</li>
-          <li>Compare refactor vs baseline at same <code className={styles.kbd}>count</code>, <code className={styles.kbd}>columnWidth</code>, <code className={styles.kbd}>overscan</code>; record warmup=5, iterations=20 deltas.</li>
-          <li>For micro work, check <code className={styles.kbd}>MasonryRoot</code> render + ResizeObserver commit in Performance → React Tracks.</li>
-        </ul>
-      </section>
     </div>
   );
 }

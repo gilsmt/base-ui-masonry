@@ -1,6 +1,7 @@
 import type * as React from 'react';
 import MasonryDemo from './experiments/masonry/MasonryDemo';
 import MasonryPerf from './experiments/masonry/MasonryPerf';
+import ScrollPerf from './experiments/masonry/ScrollPerf';
 
 export type RouteEntry =
   | {
@@ -24,12 +25,12 @@ export type RouteEntry =
 export const defaultRoute = '/masonry';
 
 export const routes: RouteEntry[] = [
-  { type: 'header', label: 'Masonry — experimentation' },
+  { type: 'header', label: 'Masonry — playground' },
   {
     type: 'route',
     path: '/masonry',
-    label: 'Interactive masonry demo',
-    description: 'tweak columns, gaps, item count',
+    label: 'Grid',
+    description: 'image-only, async heights, practical for benchmarking',
     element: <MasonryDemo />,
     showInNav: true,
   },
@@ -41,6 +42,14 @@ export const routes: RouteEntry[] = [
     label: 'Masonry virtualization perf',
     description: 'mount → settled timing vs item count',
     element: <MasonryPerf />,
+    showInNav: true,
+  },
+  {
+    type: 'route',
+    path: '/perf/scroll-hysteresis',
+    label: 'Scroll hysteresis',
+    description: 'commits & DOM mutations per 1000px scrolled',
+    element: <ScrollPerf />,
     showInNav: true,
   },
 ];

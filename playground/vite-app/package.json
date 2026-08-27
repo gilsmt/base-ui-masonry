@@ -24,6 +24,7 @@
     "@types/react-dom": "19.2.4",
     "@vitejs/plugin-react": "4.5.2",
     "cross-env": "7.0.3",
+    "react-scan": "^0.5.7",
     "tailwindcss": "4.1.13",
     "typescript": "5.9.2",
     "vite": "7.1.7"

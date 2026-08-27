@@ -30,5 +30,6 @@
     "noUncheckedIndexedAccess": false,
     "erasableSyntaxOnly": false
   },
-  "include": ["src", "../../src"]
+  "include": ["src", "../../src"],
+  "exclude": ["../../src/masonry.ssr.test.tsx", "../../src/masonry.test.ts"]
 }

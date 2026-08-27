@@ -5,31 +5,45 @@ export function Home() {
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Home</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Playground</h1>
         <p className="text-sm leading-6 text-gray-700 max-w-prose">
           Local playground for <code className="rounded bg-gray-100 px-1 py-0.5">base-ui-masonry</code>{' '}
-          — vendored <code className="rounded bg-gray-100 px-1 py-0.5">src/masonry.tsx</code>. Use it to
-          iterate on layout behavior, spot regressions, and run the masonry virtualization
-          benchmarks with the same pattern Base UI uses for <em>playground/vite-app</em>.
+          — vendored <code className="rounded bg-gray-100 px-1 py-0.5">src/masonry.tsx</code>. The
+          primary demo is a <strong>Pinterest-style image grid</strong> (real async images, variable
+          heights, window vs. contained scroll) so virtualization and{' '}
+          <code className="rounded bg-gray-100 px-1 py-0.5">ResizeObserver</code> measurement behave
+          like production. Benchmarks and profiling use the same pattern as Base UI’s{' '}
+          <em>playground/vite-app</em>.
         </p>
       </div>
 
       <Nav />
 
       <section className="rounded-lg border border-gray-200 bg-white p-4 text-sm leading-6">
-        <h2 className="font-semibold">Tips</h2>
+        <h2 className="font-semibold">What’s inside</h2>
         <ul className="list-disc pl-5 mt-2 space-y-1 text-gray-700">
           <li>
-            Edit <code className="bg-gray-100 px-1 rounded">src/masonry.tsx</code> and the playground
-            hot-reloads via Vite. No publish step.
+            <strong>/masonry</strong> — Pinterest-like grid: real{' '}
+            <code className="bg-gray-100 px-1 rounded">&lt;img&gt;</code> via seeded
+            picsum.photos, heights vary per image and are unknown until decode. Append-only infinite
+            scroll via <code className="bg-gray-100 px-1 rounded">IntersectionObserver</code>{' '}
+            sentinel keeps the fast path; toggle <em>Window</em> vs <em>Contained</em> to exercise{' '}
+            <code className="bg-gray-100 px-1 rounded">MasonryRoot container</code>.
           </li>
           <li>
-            For profiling: <code className="bg-gray-100 px-1 rounded">pnpm build:profile</code> then
-            Chrome DevTools → Performance → React Tracks (requires React DevTools extension).
+            Layout knobs only — <code className="bg-gray-100 px-1 rounded">gap</code>,{' '}
+            <code className="bg-gray-100 px-1 rounded">columnWidth</code>,{' '}
+            <code className="bg-gray-100 px-1 rounded">maxColumnCount</code>,{' '}
+            <code className="bg-gray-100 px-1 rounded">overscan</code>,{' '}
+            <code className="bg-gray-100 px-1 rounded">columnCount</code> — no feed chrome (search,
+            likes, etc.) to keep the benchmark signal clean.
           </li>
           <li>
-            Benchmark pages use a DOM-quiet-window timer (same as Base UI) to measure mount →
-            layout-settled time.
+            Resize the window — columns reflow without remounting. Edit{' '}
+            <code className="bg-gray-100 px-1 rounded">src/masonry.tsx</code> and the playground
+            hot-reloads. Profiling:{' '}
+            <code className="bg-gray-100 px-1 rounded">pnpm build:profile</code> then Chrome DevTools →
+            Performance → React Tracks.
           </li>
         </ul>
       </section>
