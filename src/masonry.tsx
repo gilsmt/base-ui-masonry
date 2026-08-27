@@ -11,6 +11,7 @@ import { useIsoLayoutEffect } from "@base-ui/utils/useIsoLayoutEffect";
 import { useMergedRefs } from "@base-ui/utils/useMergedRefs";
 import { useRefWithInit } from "@base-ui/utils/useRefWithInit";
 import { useStableCallback } from "@base-ui/utils/useStableCallback";
+import { useValueAsRef } from "@base-ui/utils/useValueAsRef";
 import { warn } from "@base-ui/utils/warn";
 import * as React from "react";
 import { flushSync } from "react-dom";
@@ -43,11 +44,11 @@ const MasonryDataAttributes = {
 /* ------------------------------------ Shared utils ----------------------------------- */
 
 function getNodeDataIndex(node: Element): number | null {
-    const raw = node.getAttribute(MasonryDataAttributes.index);
-    if (raw === null) {
+    const attr = node.getAttribute(MasonryDataAttributes.index);
+    if (attr === null) {
         return null;
     }
-    const index = Number(raw);
+    const index = Number(attr);
     return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
@@ -71,6 +72,23 @@ function parsePositiveFiniteNumber(value: number | undefined, fallback: number) 
 
 function parseMeasuredItemHeight(value: number | undefined) {
     return parsePositiveFiniteNumber(value, 1);
+}
+
+interface WindowRange {
+    start: number;
+    end: number;
+}
+
+export function getWindowRange(scrollY: number, viewHeight: number, overscan: number): WindowRange {
+    const overscanPixels = viewHeight > 0 ? viewHeight * overscan : 0;
+    return {
+        start: Math.max(0, scrollY - overscanPixels * (1 - DEFAULT_FORWARD_OVERSCAN)),
+        end: scrollY + viewHeight + overscanPixels * DEFAULT_FORWARD_OVERSCAN,
+    };
+}
+
+function getScrollTop(measurements: Measurements) {
+    return Math.max(0, measurements.scrollY - measurements.containerOffset);
 }
 
 /* ------------------------------------- Positioner ------------------------------------ */
@@ -98,14 +116,15 @@ interface PositionerOptions {
     verticalGap?: number;
 }
 
-function getItem<T>(items: readonly T[], index: number): T {
-    return items[index]!;
+function getValue<T>(values: readonly T[], index: number): T {
+    return values[index]!;
 }
 
 function findShortestColumn(columnHeights: readonly number[]): { height: number; index: number } {
     let shortestIndex = 0;
     let shortestHeight = Number.POSITIVE_INFINITY;
-    for (const [columnIndex, columnHeight] of columnHeights.entries()) {
+    const entries = columnHeights.entries();
+    for (const [columnIndex, columnHeight] of entries) {
         if (columnHeight < shortestHeight) {
             shortestHeight = columnHeight;
             shortestIndex = columnIndex;
@@ -114,15 +133,12 @@ function findShortestColumn(columnHeights: readonly number[]): { height: number;
     return { height: shortestHeight, index: shortestIndex };
 }
 
-function findLowerBoundIndex(
-    items: readonly PositionerItem[],
-    predicate: (item: PositionerItem) => boolean,
-): number {
+function findFirstIndex(values: readonly number[], satisfies: (value: number) => boolean): number {
     let start = 0;
-    let end = items.length;
+    let end = values.length;
     while (start < end) {
         const middle = (start + end) >>> 1;
-        if (predicate(getItem(items, middle))) {
+        if (satisfies(getValue(values, middle))) {
             end = middle;
         } else {
             start = middle + 1;
@@ -131,17 +147,20 @@ function findLowerBoundIndex(
     return start;
 }
 
-function findFirstOverlappingItemIndex(items: readonly PositionerItem[], low: number): number {
-    // First item that begins at or after `low`...
-    const startIndex = findLowerBoundIndex(items, (item) => item.top >= low);
-    // ...but the item above it may still reach down across `low`.
-    if (startIndex > 0) {
-        const itemAbove = getItem(items, startIndex - 1);
-        if (itemAbove.top + itemAbove.height >= low) {
-            return startIndex - 1;
+function findFirstOverlappingRow(
+    tops: readonly number[],
+    items: readonly number[],
+    itemHeights: readonly number[],
+    low: number,
+): number {
+    const row = findFirstIndex(tops, (top) => top >= low);
+    if (row > 0) {
+        const itemAbove = getValue(items, row - 1);
+        if (getValue(tops, row - 1) + getValue(itemHeights, itemAbove) >= low) {
+            return row - 1;
         }
     }
-    return startIndex;
+    return row;
 }
 
 function countFittingColumns(containerWidth: number, columnWidth: number, columnGap: number) {
@@ -150,71 +169,74 @@ function countFittingColumns(containerWidth: number, columnWidth: number, column
 
 function parsePositionerOptions({
     columnCount,
-    columnWidth = DEFAULT_COLUMN_WIDTH,
+    columnWidth: preferredWidth = DEFAULT_COLUMN_WIDTH,
     containerWidth,
     horizontalGap,
     maxColumnCount = Number.POSITIVE_INFINITY,
     verticalGap,
 }: PositionerOptions) {
-    const normalizedContainerWidth = parsePositiveFiniteNumber(containerWidth, 0);
-    const normalizedColumnWidth = parsePositiveFiniteNumber(columnWidth, DEFAULT_COLUMN_WIDTH);
+    const width = parsePositiveFiniteNumber(containerWidth, 0);
+    const rawItemWidth = parsePositiveFiniteNumber(preferredWidth, DEFAULT_COLUMN_WIDTH);
     const columnGap = parseFiniteNumber(horizontalGap, 0, DEFAULT_GAP);
     const rowGap = parseFiniteNumber(verticalGap, 0, columnGap);
 
-    const derivedColumnCount = Math.min(
-        countFittingColumns(normalizedContainerWidth, normalizedColumnWidth, columnGap),
-        countFittingColumns(normalizedContainerWidth, MINIMUM_COLUMN_WIDTH, columnGap),
-        maxColumnCount,
+    const itemWidth = Math.max(MINIMUM_COLUMN_WIDTH, rawItemWidth);
+    const requested = parsePositiveFiniteNumber(
+        columnCount,
+        Math.min(countFittingColumns(width, itemWidth, columnGap), maxColumnCount),
     );
-    const requestedColumnCount = parsePositiveFiniteNumber(columnCount, derivedColumnCount);
-    const resolvedColumnCount = Math.max(1, Math.floor(requestedColumnCount));
+    const count = Math.max(1, Math.floor(requested));
+    const columnWidth = Math.max(0, Math.floor((width - columnGap * (count - 1)) / count));
 
-    const resolvedColumnWidth = Math.max(
-        0,
-        Math.floor(
-            (normalizedContainerWidth - columnGap * (resolvedColumnCount - 1)) /
-                resolvedColumnCount,
-        ),
-    );
-
-    if (resolvedColumnWidth === 0 && normalizedContainerWidth > 0) {
+    if (columnWidth === 0 && width > 0) {
         warn(
             "MasonryRoot: `columnCount` exceeds the container space, collapsing columns to zero width and overlapping items. Increase the container width, reduce `columnCount`, or lower the horizontal gap.",
         );
     }
 
-    return {
-        columnCount: resolvedColumnCount,
-        columnGap,
-        columnWidth: resolvedColumnWidth,
-        rowGap,
-    };
+    return { columnCount: count, columnGap, columnWidth, rowGap };
 }
 
-function areResolvedOptionsEqual(
-    a: ReturnType<typeof parsePositionerOptions>,
-    b: ReturnType<typeof parsePositionerOptions>,
-) {
+type ResolvedPositionerOptions = ReturnType<typeof parsePositionerOptions>;
+
+function areOptionsEqual(previous: ResolvedPositionerOptions, next: ResolvedPositionerOptions) {
     return (
-        a.columnCount === b.columnCount &&
-        a.columnGap === b.columnGap &&
-        a.columnWidth === b.columnWidth &&
-        a.rowGap === b.rowGap
+        previous.columnCount === next.columnCount &&
+        previous.columnGap === next.columnGap &&
+        previous.columnWidth === next.columnWidth &&
+        previous.rowGap === next.rowGap
     );
 }
 
-function buildPositioner(options: PositionerOptions) {
+export function buildPositioner(options: PositionerOptions) {
     const { columnCount, columnGap, columnWidth, rowGap } = parsePositionerOptions(options);
+    const stride = columnWidth + columnGap;
 
-    const items: PositionerItem[] = [];
-    const columns: PositionerItem[][] = Array.from({ length: columnCount }, () => []);
+    const columns: number[][] = Array.from({ length: columnCount }, () => []);
+    const columnTops: number[][] = Array.from({ length: columnCount }, () => []);
     const columnHeights: number[] = Array.from({ length: columnCount }, () => 0);
+    const itemColumns: number[] = [];
+    const itemRows: number[] = [];
+    const itemHeights: number[] = [];
+
+    function createPlacement(index: number): PositionerItem {
+        const columnIndex = getValue(itemColumns, index);
+        const row = getValue(itemRows, index);
+        return {
+            columnIndex,
+            columnItemIndex: row,
+            height: getValue(itemHeights, index),
+            index,
+            left: columnIndex * stride,
+            top: getValue(getValue(columnTops, columnIndex), row),
+        };
+    }
 
     function estimateHeight(itemCount: number, defaultItemHeight: number) {
         const tallestColumn = Math.max(...columnHeights);
-        const remainingItemCount = Math.max(0, itemCount - items.length);
+        const remainingItemCount = Math.max(0, itemCount - itemHeights.length);
         const remainingRowCount = Math.ceil(remainingItemCount / columnCount);
-        const leadingGap = items.length > 0 && remainingRowCount > 0 ? rowGap : 0;
+        const leadingGap = itemHeights.length > 0 && remainingRowCount > 0 ? rowGap : 0;
         const meanColumnHeight =
             columnHeights.reduce((sum, columnHeight) => sum + columnHeight, 0) / columnCount;
         const remainingHeight =
@@ -225,18 +247,22 @@ function buildPositioner(options: PositionerOptions) {
     }
 
     function get(index: number) {
-        return items[index];
+        return index >= 0 && index < itemHeights.length ? createPlacement(index) : undefined;
     }
 
     function range(low: number, high: number, visitItem: (item: PositionerItem) => void) {
-        for (const columnItems of columns) {
-            const start = findFirstOverlappingItemIndex(columnItems, low);
-            for (let index = start; index < columnItems.length; index += 1) {
-                const item = getItem(columnItems, index);
-                if (item.top > high) {
-                    break; // past the visible window
+        for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+            const columnItems = getValue(columns, columnIndex);
+            const tops = getValue(columnTops, columnIndex);
+            for (
+                let row = findFirstOverlappingRow(tops, columnItems, itemHeights, low);
+                row < columnItems.length;
+                row += 1
+            ) {
+                if (getValue(tops, row) > high) {
+                    break;
                 }
-                visitItem(item);
+                visitItem(createPlacement(getValue(columnItems, row)));
             }
         }
     }
@@ -244,18 +270,13 @@ function buildPositioner(options: PositionerOptions) {
     function set(height: number) {
         const itemHeight = parseMeasuredItemHeight(height);
         const columnIndex = findShortestColumn(columnHeights).index;
-        const columnItems = getItem(columns, columnIndex);
-        const top = columnItems.length > 0 ? getItem(columnHeights, columnIndex) + rowGap : 0;
-        const item: PositionerItem = {
-            columnIndex,
-            columnItemIndex: columnItems.length,
-            height: itemHeight,
-            index: items.length,
-            left: columnIndex * (columnWidth + columnGap),
-            top,
-        };
-        items.push(item);
-        columnItems.push(item);
+        const columnItems = getValue(columns, columnIndex);
+        const top = columnItems.length > 0 ? getValue(columnHeights, columnIndex) + rowGap : 0;
+        itemColumns.push(columnIndex);
+        itemRows.push(columnItems.length);
+        itemHeights.push(itemHeight);
+        columnItems.push(itemHeights.length - 1);
+        getValue(columnTops, columnIndex).push(top);
         columnHeights[columnIndex] = top + itemHeight;
     }
 
@@ -264,56 +285,69 @@ function buildPositioner(options: PositionerOptions) {
     }
 
     function size() {
-        return items.length;
+        return itemHeights.length;
     }
 
-    function collectUpdates(updates: readonly PositionerUpdate[]) {
-        const nextHeightByIndex = new Map<number, number>();
-        const firstChangedItemByColumn = new Map<number, PositionerItem>();
-
-        for (const update of updates) {
-            nextHeightByIndex.set(update.index, parseMeasuredItemHeight(update.height));
-            const changedItem = getItem(items, update.index);
-            const firstChangedItem = firstChangedItemByColumn.get(changedItem.columnIndex);
-            if (firstChangedItem === undefined || changedItem.index < firstChangedItem.index) {
-                firstChangedItemByColumn.set(changedItem.columnIndex, changedItem);
+    function isWindowShiftInert(previous: WindowRange, next: WindowRange) {
+        if (previous.start === next.start && previous.end === next.end) {
+            return true;
+        }
+        if (size() === 0 || !(shortestColumn() >= next.end)) {
+            return false;
+        }
+        for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+            const tops = getValue(columnTops, columnIndex);
+            const columnItems = getValue(columns, columnIndex);
+            const row = findFirstOverlappingRow(tops, columnItems, itemHeights, previous.start);
+            if (
+                row !== findFirstOverlappingRow(tops, columnItems, itemHeights, next.start) ||
+                findFirstIndex(tops, (top) => top > previous.end) !==
+                    findFirstIndex(tops, (top) => top > next.end)
+            ) {
+                return false;
             }
         }
-
-        return { firstChangedItemByColumn, nextHeightByIndex };
-    }
-
-    function reflowColumn(
-        firstChangedItem: PositionerItem,
-        nextHeightByIndex: ReadonlyMap<number, number>,
-    ) {
-        const columnIndex = firstChangedItem.columnIndex;
-        const columnItems = getItem(columns, columnIndex);
-        let top = firstChangedItem.top;
-        for (
-            let itemIndex = firstChangedItem.columnItemIndex;
-            itemIndex < columnItems.length;
-            itemIndex += 1
-        ) {
-            const previousItem = getItem(columnItems, itemIndex);
-            const height = nextHeightByIndex.get(previousItem.index) ?? previousItem.height;
-            const nextItem: PositionerItem = {
-                ...previousItem,
-                height,
-                top,
-            };
-            columnItems[itemIndex] = nextItem;
-            items[previousItem.index] = nextItem;
-            top += height + rowGap;
-        }
-        const lastItem = getItem(columnItems, columnItems.length - 1);
-        columnHeights[columnIndex] = lastItem.top + lastItem.height;
+        return true;
     }
 
     function update(updates: readonly PositionerUpdate[]) {
-        const { firstChangedItemByColumn, nextHeightByIndex } = collectUpdates(updates);
-        for (const firstChangedItem of firstChangedItemByColumn.values()) {
-            reflowColumn(firstChangedItem, nextHeightByIndex);
+        const firstChangedRows: number[] = new Array(columnCount).fill(-1);
+        const lastChangedRows: number[] = new Array(columnCount).fill(-1);
+        for (const { index, height } of updates) {
+            const itemHeight = parseMeasuredItemHeight(height);
+            if (getValue(itemHeights, index) === itemHeight) {
+                continue;
+            }
+            itemHeights[index] = itemHeight;
+            const columnIndex = getValue(itemColumns, index);
+            const row = getValue(itemRows, index);
+            const firstChangedRow = getValue(firstChangedRows, columnIndex);
+            if (firstChangedRow < 0 || row < firstChangedRow) {
+                firstChangedRows[columnIndex] = row;
+            }
+            if (row > getValue(lastChangedRows, columnIndex)) {
+                lastChangedRows[columnIndex] = row;
+            }
+        }
+        for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+            const startRow = getValue(firstChangedRows, columnIndex);
+            if (startRow < 0) {
+                continue;
+            }
+            const columnItems = getValue(columns, columnIndex);
+            const tops = getValue(columnTops, columnIndex);
+            const lastChangedRow = Math.max(startRow, getValue(lastChangedRows, columnIndex));
+            let top = getValue(tops, startRow);
+            for (let row = startRow; row < columnItems.length; row += 1) {
+                if (row > lastChangedRow && getValue(tops, row) === top) {
+                    break;
+                }
+                tops[row] = top;
+                top += getValue(itemHeights, getValue(columnItems, row)) + rowGap;
+            }
+            const lastRow = columnItems.length - 1;
+            columnHeights[columnIndex] =
+                getValue(tops, lastRow) + getValue(itemHeights, getValue(columnItems, lastRow));
         }
     }
 
@@ -322,6 +356,7 @@ function buildPositioner(options: PositionerOptions) {
         columnWidth,
         estimateHeight,
         get,
+        isWindowShiftInert,
         range,
         set,
         shortestColumn,
@@ -375,20 +410,11 @@ function useItemResizeObserver(
     return resizeObserver;
 }
 
-interface Measurements {
+export interface Measurements {
     containerOffset: number;
     containerWidth: number;
     scrollY: number;
     windowHeight: number;
-}
-
-function areMeasurementsEqual(first: Measurements, second: Measurements) {
-    return (
-        first.containerOffset === second.containerOffset &&
-        first.containerWidth === second.containerWidth &&
-        first.scrollY === second.scrollY &&
-        first.windowHeight === second.windowHeight
-    );
 }
 
 const DEFAULT_MEASUREMENTS: Measurements = {
@@ -398,46 +424,103 @@ const DEFAULT_MEASUREMENTS: Measurements = {
     windowHeight: 0,
 };
 
+function canSkipUpdate(
+    committed: Measurements,
+    next: Measurements,
+    skipUpdatePredicate?: (committed: Measurements, next: Measurements) => boolean,
+): boolean {
+    const sameOffset = next.containerOffset === committed.containerOffset;
+    const sameWidth = next.containerWidth === committed.containerWidth;
+    const sameHeight = next.windowHeight === committed.windowHeight;
+    if (sameOffset && sameWidth && sameHeight && next.scrollY === committed.scrollY) {
+        return true; // unchanged, nothing to paint
+    }
+    if (sameOffset && sameWidth && sameHeight) {
+        return !!skipUpdatePredicate?.(committed, next); // scroll-only: hysteresis decides
+    }
+    return false; // layout changed, commit
+}
+
 function useMeasurements(
     containerRef: React.RefObject<HTMLDivElement | null>,
     scrollElement: HTMLElement | null,
+    skipUpdatePredicate?: (committed: Measurements, next: Measurements) => boolean,
+    onSyncPrepare?: () => boolean,
+    onExternalLayoutChange?: () => void,
 ) {
-    const [measurements, setMeasurements] = React.useState<Measurements>(DEFAULT_MEASUREMENTS);
     const animationFrame = useAnimationFrame();
+    const [measurements, setMeasurements] = React.useState<Measurements>(DEFAULT_MEASUREMENTS);
+    const measurementsRef = useValueAsRef(measurements);
+    const isDirtyRef = React.useRef(true);
+    const prevScrollElementRef = React.useRef(scrollElement);
+    if (prevScrollElementRef.current !== scrollElement) {
+        isDirtyRef.current = true;
+        prevScrollElementRef.current = scrollElement;
+    }
 
     const sync = useStableCallback(() => {
+        const didMutateLayout = onSyncPrepare ? onSyncPrepare() : false;
+
         const container = containerRef.current;
         if (!container) {
             return;
         }
 
+        const previous = measurementsRef.current;
         const win = ownerWindow(container);
         const scrollY = scrollElement ? scrollElement.scrollTop : win.scrollY;
+        let nextMeasurements: Measurements | null = null;
 
-        const scrollOriginOffset = scrollElement
-            ? scrollElement.getBoundingClientRect().top + scrollElement.clientTop
-            : 0;
+        if (!isDirtyRef.current) {
+            const next: Measurements = {
+                containerOffset: previous.containerOffset,
+                containerWidth: previous.containerWidth,
+                scrollY,
+                windowHeight: previous.windowHeight,
+            };
+            if (!canSkipUpdate(previous, next, skipUpdatePredicate)) {
+                nextMeasurements = next;
+            }
+        } else {
+            isDirtyRef.current = false;
 
-        const rootNodeRect = container.getBoundingClientRect();
-        const next: Measurements = {
-            containerOffset: rootNodeRect.top - scrollOriginOffset + scrollY,
-            containerWidth: container.clientWidth,
-            scrollY,
-            windowHeight: scrollElement
-                ? scrollElement.clientHeight
-                : ownerDocument(container).documentElement.clientHeight,
-        };
+            const containerRect = container.getBoundingClientRect();
+            const scrollOriginOffset = scrollElement
+                ? scrollElement.getBoundingClientRect().top + scrollElement.clientTop
+                : 0;
+            const next: Measurements = {
+                containerOffset: containerRect.top - scrollOriginOffset + scrollY,
+                containerWidth: container.clientWidth,
+                scrollY,
+                windowHeight: scrollElement
+                    ? scrollElement.clientHeight
+                    : ownerDocument(container).documentElement.clientHeight,
+            };
 
-        if (areMeasurementsEqual(measurements, next)) {
-            return;
+            if (!canSkipUpdate(previous, next, skipUpdatePredicate)) {
+                nextMeasurements = next;
+            }
         }
 
-        flushSync(() => {
-            setMeasurements(next);
-        });
+        if (nextMeasurements !== null || didMutateLayout) {
+            // One synchronous, pre-paint commit per frame
+            flushSync(() => {
+                if (nextMeasurements !== null) {
+                    setMeasurements(nextMeasurements);
+                }
+                if (didMutateLayout) {
+                    onExternalLayoutChange?.();
+                }
+            });
+        }
     });
 
-    const scheduleLayoutSync = useStableCallback(() => {
+    const scheduleSync = useStableCallback(() => {
+        isDirtyRef.current = true;
+        animationFrame.request(sync);
+    });
+
+    const requestSync = useStableCallback(() => {
         animationFrame.request(sync);
     });
 
@@ -447,44 +530,36 @@ function useMeasurements(
             return;
         }
 
-        scheduleLayoutSync();
+        scheduleSync();
 
         const resizeObserver =
-            typeof ResizeObserver === "function" ? new ResizeObserver(scheduleLayoutSync) : null;
+            typeof ResizeObserver === "function" ? new ResizeObserver(scheduleSync) : null;
 
         if (resizeObserver) {
             resizeObserver.observe(container);
             if (scrollElement) {
                 resizeObserver.observe(scrollElement);
             }
-            // Shifts above the container can move it without resizing it,
-            // leaving `containerOffset` stale; observe its positioned
-            // ancestors so such shifts still trigger a resync.
-            const doc = ownerDocument(container);
-            resizeObserver.observe(doc.body);
-            resizeObserver.observe(doc.documentElement);
-            let offsetAncestor = container.offsetParent as HTMLElement | null;
-            while (offsetAncestor) {
-                resizeObserver.observe(offsetAncestor);
-                offsetAncestor = offsetAncestor.offsetParent as HTMLElement | null;
-            }
+            resizeObserver.observe(ownerDocument(container).body);
         }
 
         const win = ownerWindow(container);
         return mergeCleanups(
-            addEventListener(scrollElement ?? win, "scroll", scheduleLayoutSync, { passive: true }),
-            addEventListener(win, "resize", scheduleLayoutSync),
-            addEventListener(win, "orientationchange", scheduleLayoutSync),
+            addEventListener(scrollElement ?? win, "scroll", scheduleSync, { passive: true }),
+            addEventListener(win, "resize", scheduleSync),
+            addEventListener(win, "orientationchange", scheduleSync),
             win.visualViewport
-                ? addEventListener(win.visualViewport, "resize", scheduleLayoutSync)
+                ? addEventListener(win.visualViewport, "resize", scheduleSync)
                 : null,
             resizeObserver ? () => resizeObserver.disconnect() : null,
         );
-    }, [containerRef, scheduleLayoutSync, scrollElement]);
+    }, [containerRef, scheduleSync, scrollElement]);
 
     return {
         containerWidth: measurements.containerWidth,
-        scrollTop: Math.max(0, measurements.scrollY - measurements.containerOffset),
+        scheduleSync,
+        requestSync,
+        scrollTop: getScrollTop(measurements),
         windowHeight: measurements.windowHeight,
     };
 }
@@ -505,14 +580,14 @@ interface PendingItemMeasurement {
     node: HTMLElement;
 }
 
-interface ItemSlotProps {
+export interface ItemSlotProps {
     child: React.ReactElement<MasonryItemSlotProps>;
-    columnWidth: number;
+    width: number;
     index: number;
     inert: boolean;
     itemCount: number;
     item: PositionerItem | null;
-    register: (index: number, node: HTMLDivElement) => () => void;
+    register: (index: number, node: HTMLElement) => (() => void) | undefined;
     resetKey: number;
 }
 
@@ -522,18 +597,20 @@ function isMasonryChildElement(
     return React.isValidElement(node) && node.type !== React.Fragment;
 }
 
-function isSamePlacement(a: PositionerItem | null, b: PositionerItem | null) {
-    if (a === null || b === null) {
-        return a === b;
+export function arePlacementsEqual(previous: PositionerItem | null, next: PositionerItem | null) {
+    if (previous === null || next === null) {
+        return previous === next;
     }
-    return a.left === b.left && a.top === b.top && a.height === b.height;
+    return (
+        previous.left === next.left && previous.top === next.top && previous.height === next.height
+    );
 }
 
-function areItemSlotPropsEqual(previous: ItemSlotProps, next: ItemSlotProps): boolean {
+export function areItemSlotPropsEqual(previous: ItemSlotProps, next: ItemSlotProps): boolean {
     return (
-        isSamePlacement(previous.item, next.item) &&
+        arePlacementsEqual(previous.item, next.item) &&
         previous.child === next.child &&
-        previous.columnWidth === next.columnWidth &&
+        previous.width === next.width &&
         previous.index === next.index &&
         previous.inert === next.inert &&
         previous.itemCount === next.itemCount &&
@@ -542,9 +619,9 @@ function areItemSlotPropsEqual(previous: ItemSlotProps, next: ItemSlotProps): bo
     );
 }
 
-const ItemSlot = React.memo(function ItemSlot({
+export const ItemSlot = React.memo(function ItemSlot({
     child,
-    columnWidth,
+    width,
     index,
     inert,
     itemCount,
@@ -553,8 +630,11 @@ const ItemSlot = React.memo(function ItemSlot({
     resetKey,
 }: ItemSlotProps): React.ReactElement {
     const registerNode = React.useCallback(
-        (node: HTMLDivElement) => {
+        (node: HTMLDivElement | null) => {
             void resetKey; // read deliberately so callback keeps the dep
+            if (node === null) {
+                return undefined;
+            }
             return register(index, node);
         },
         [index, register, resetKey],
@@ -563,7 +643,7 @@ const ItemSlot = React.memo(function ItemSlot({
 
     const style: React.CSSProperties = {
         position: "absolute",
-        width: columnWidth,
+        width,
         writingMode: "horizontal-tb",
         left: 0,
         top: 0,
@@ -586,9 +666,9 @@ const ItemSlot = React.memo(function ItemSlot({
     });
 }, areItemSlotPropsEqual);
 
-function commitPendingMeasurements(
+export function commitPendingMeasurements(
     positioner: Positioner,
-    pendingMeasurements: ReadonlyMap<number, PendingItemMeasurement>,
+    pendingMeasurements: Map<number, PendingItemMeasurement>,
 ): boolean {
     const updates: PositionerUpdate[] = [];
     let didChange = false;
@@ -597,6 +677,7 @@ function commitPendingMeasurements(
     for (const index of indices) {
         const measurement = pendingMeasurements.get(index)!;
         if (!measurement.node.isConnected || getNodeDataIndex(measurement.node) !== index) {
+            pendingMeasurements.delete(index);
             continue;
         }
 
@@ -606,10 +687,14 @@ function commitPendingMeasurements(
                 continue;
             }
             positioner.set(measurement.height);
+            pendingMeasurements.delete(index);
             didChange = true;
         } else if (item.height !== measurement.height) {
             updates.push({ height: measurement.height, index });
+            pendingMeasurements.delete(index);
             didChange = true;
+        } else {
+            pendingMeasurements.delete(index);
         }
     }
 
@@ -621,14 +706,13 @@ function commitPendingMeasurements(
     return didChange;
 }
 
-function areItemKeysPrefixEqual(
-    previousKeys: readonly (React.Key | null)[],
-    nextKeys: readonly (React.Key | null)[],
-) {
+type Keys = readonly (React.Key | null)[];
+
+function areKeysAppendOnly(previous: Keys, next: Keys) {
     return (
-        previousKeys === nextKeys ||
-        (previousKeys.length <= nextKeys.length &&
-            previousKeys.every((key, index) => key === nextKeys[index]))
+        previous === next ||
+        (previous.length <= next.length &&
+            previous.every((key, index) => key === getValue(next, index)))
     );
 }
 
@@ -688,9 +772,9 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         columnCount,
         columnWidth = DEFAULT_COLUMN_WIDTH,
         gap = DEFAULT_GAP,
-        itemHeight = DEFAULT_ITEM_HEIGHT,
+        itemHeight: rawItemHeight = DEFAULT_ITEM_HEIGHT,
         maxColumnCount: maxColumnCountProp,
-        overscan = DEFAULT_OVERSCAN,
+        overscan: overscanProp = DEFAULT_OVERSCAN,
         container = null,
         className,
         render,
@@ -699,13 +783,39 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     } = componentProps;
 
     const containerRef = React.useRef<HTMLDivElement | null>(null);
-    const { containerWidth, scrollTop, windowHeight } = useMeasurements(containerRef, container);
     const rerender = useForcedRerendering();
-    const animationFrame = useAnimationFrame();
 
     const { horizontalGap, verticalGap } = parseGapDirectionalValues(gap);
-    const normalizedItemHeight = parseFiniteNumber(itemHeight, 1, DEFAULT_ITEM_HEIGHT);
+    const itemAvg = parseFiniteNumber(rawItemHeight, 1, DEFAULT_ITEM_HEIGHT);
+    const resolvedHorizontalGap = parseFiniteNumber(horizontalGap, 0, DEFAULT_GAP);
+    const rowGap = parseFiniteNumber(verticalGap, 0, resolvedHorizontalGap);
     const maxColumnCount = parsePositiveFiniteNumber(maxColumnCountProp, Number.POSITIVE_INFINITY);
+
+    const overscanValue =
+        overscanProp === Infinity
+            ? overscanProp
+            : parseFiniteNumber(overscanProp, 0, DEFAULT_OVERSCAN);
+    const overscanRef = useValueAsRef(overscanValue);
+
+    const isScrollUpdateRedundant = useStableCallback((prev: Measurements, next: Measurements) =>
+        positionerRef.current.isWindowShiftInert(
+            getWindowRange(getScrollTop(prev), prev.windowHeight, overscanRef.current),
+            getWindowRange(getScrollTop(next), next.windowHeight, overscanRef.current),
+        ),
+    );
+
+    const commit = useStableCallback(() =>
+        commitPendingMeasurements(positionerRef.current, pendingRef.current),
+    );
+
+    const { containerWidth, scheduleSync, requestSync, scrollTop, windowHeight } = useMeasurements(
+        containerRef,
+        container,
+        isScrollUpdateRedundant,
+        commit,
+        rerender,
+    );
+
     const latestOptions: PositionerOptions = React.useMemo(
         () => ({
             columnCount,
@@ -718,11 +828,12 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         [columnCount, columnWidth, containerWidth, horizontalGap, maxColumnCount, verticalGap],
     );
 
-    const resetCountRef = useRefWithInit(() => ({ value: 0 })); // Bumped on layout reset so every mounted slot re-reports its measurement
+    // Bumped on layout reset so every mounted slot re-reports its measurement
+    const resetCountRef = useRefWithInit(() => ({ value: 0 }));
     const positionerRef = useRefWithInit(() => buildPositioner(latestOptions));
-    const committedResolvedOptionsRef = useRefWithInit(() => parsePositionerOptions(latestOptions));
-    const committedItemKeysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
-    const pendingMeasurementsRef = useRefWithInit(() => new Map<number, PendingItemMeasurement>());
+    const optionsRef = useRefWithInit(() => parsePositionerOptions(latestOptions));
+    const keysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
+    const pendingRef = useRefWithInit(() => new Map<number, PendingItemMeasurement>());
     const positioner = positionerRef.current;
 
     // React.Children.toArray is opaque to the React Compiler,
@@ -731,74 +842,50 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         () => React.Children.toArray(children).filter(isMasonryChildElement),
         [children],
     );
-    const currentItemKeys = React.useMemo(
-        () => validChildren.map((child) => child.key),
-        [validChildren],
-    );
+    const keys = React.useMemo(() => validChildren.map((child) => child.key), [validChildren]);
     const itemCount = validChildren.length;
 
-    const commitQueuedMeasurements = useStableCallback(() => {
-        const didCommit = commitPendingMeasurements(
-            positionerRef.current,
-            pendingMeasurementsRef.current,
-        );
-        if (pendingMeasurementsRef.current.size > 0) {
-            pendingMeasurementsRef.current = new Map();
-        }
-
-        if (didCommit) {
-            flushSync(() => {
-                rerender();
-            });
-        }
-    });
-
     const queueMeasurementCommit = useStableCallback(
-        (index: number, node: HTMLElement, measuredHeight: number) => {
-            pendingMeasurementsRef.current.set(index, {
-                height: measuredHeight,
-                node,
-            });
-            animationFrame.request(commitQueuedMeasurements);
+        (index: number, node: HTMLElement, height: number) => {
+            pendingRef.current.set(index, { height, node });
+            requestSync(); // Item-height events never flag DOM geometry dirty
         },
     );
 
     const resizeObserver = useItemResizeObserver(queueMeasurementCommit);
 
-    const registerItemNode = useStableCallback((index: number, node: HTMLDivElement) => {
+    const registerItemNode = useStableCallback((index: number, node: HTMLElement) => {
+        if (!(node instanceof Element)) {
+            return undefined;
+        }
         resizeObserver?.observe(node);
         queueMeasurementCommit(index, node, node.offsetHeight);
         return () => {
             resizeObserver?.unobserve(node);
-            const pendingMeasurement = pendingMeasurementsRef.current.get(index);
-            if (pendingMeasurement?.node === node) {
-                pendingMeasurementsRef.current.delete(index);
+            if (pendingRef.current.get(index)?.node === node) {
+                pendingRef.current.delete(index);
             }
         };
     });
 
     useIsoLayoutEffect(() => {
-        const shouldResetPositioner =
-            committedItemKeysRef.current !== null &&
-            !areItemKeysPrefixEqual(committedItemKeysRef.current, currentItemKeys);
+        const committedKeys = keysRef.current;
+        const shouldReset = committedKeys !== null && !areKeysAppendOnly(committedKeys, keys);
 
-        const nextResolvedOptions = parsePositionerOptions(latestOptions);
-        const committedResolvedOptions = committedResolvedOptionsRef.current;
+        const nextOptions = parsePositionerOptions(latestOptions);
+        const prevOptions = optionsRef.current;
+        const shouldRebuild = !shouldReset && !areOptionsEqual(prevOptions, nextOptions);
 
-        const shouldRebuildPositioner =
-            !shouldResetPositioner &&
-            !areResolvedOptionsEqual(committedResolvedOptions, nextResolvedOptions);
+        keysRef.current = keys;
+        optionsRef.current = nextOptions;
 
-        committedItemKeysRef.current = currentItemKeys;
-        committedResolvedOptionsRef.current = nextResolvedOptions;
-
-        if (shouldResetPositioner || shouldRebuildPositioner) {
+        if (shouldReset || shouldRebuild) {
             let nextPositioner: Positioner;
-            if (shouldResetPositioner) {
+            if (shouldReset) {
                 warn(
                     "MasonryRoot: item keys changed by more than appending (reorder, insertion, or removal). The layout was rebuilt from mounted items; provide stable `key`s to keep reordering cheap.",
                 );
-                pendingMeasurementsRef.current.clear();
+                pendingRef.current.clear();
                 resetCountRef.current.value += 1;
                 nextPositioner = buildPositioner(latestOptions);
                 const container = containerRef.current;
@@ -824,24 +911,20 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
 
             positionerRef.current = nextPositioner;
             rerender();
+            scheduleSync();
         }
-    }, [currentItemKeys, itemCount, latestOptions, rerender]);
+    }, [keys, itemCount, latestOptions, rerender, scheduleSync]);
 
-    const firstUnmeasuredIndex = positioner.size();
-    const shortestColumnSize = positioner.shortestColumn();
+    const unmeasuredStart = positioner.size();
+    const minCol = positioner.shortestColumn();
+    const { start: rangeStart, end: rangeEnd } = getWindowRange(
+        scrollTop,
+        windowHeight,
+        overscanValue,
+    );
 
-    const normalizedOverscan =
-        overscan === Infinity ? overscan : parseFiniteNumber(overscan, 0, DEFAULT_OVERSCAN);
-    const overscanPixels = windowHeight > 0 ? windowHeight * normalizedOverscan : 0;
-
-    const backwardOverscanPixels = overscanPixels * (1 - DEFAULT_FORWARD_OVERSCAN);
-    const forwardOverscanPixels = overscanPixels * DEFAULT_FORWARD_OVERSCAN;
-
-    const rangeStart = Math.max(0, scrollTop - backwardOverscanPixels);
-    const rangeEnd = scrollTop + windowHeight + forwardOverscanPixels;
-
-    const windowNeedsMoreItems = firstUnmeasuredIndex === 0 || shortestColumnSize < rangeEnd;
-    const isLayoutOutdated = windowNeedsMoreItems && firstUnmeasuredIndex < itemCount;
+    const windowNeedsMoreItems = unmeasuredStart === 0 || minCol < rangeEnd;
+    const isLayoutOutdated = windowNeedsMoreItems && unmeasuredStart < itemCount;
 
     const positionedChildren: React.ReactElement[] = [];
 
@@ -854,7 +937,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
             <ItemSlot
                 key={child.key}
                 child={child}
-                columnWidth={positioner.columnWidth}
+                width={positioner.columnWidth}
                 index={index}
                 inert={inert}
                 itemCount={itemCount}
@@ -870,25 +953,22 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     });
 
     if (isLayoutOutdated) {
-        // Before anything is measured, place at least one full row so every
-        // column contributes real heights to the layout.
-        const minimumBatchSize = firstUnmeasuredIndex === 0 ? positioner.columnCount : 0;
-        const estimatedBatchSize = Math.ceil(
-            ((rangeEnd - shortestColumnSize) / normalizedItemHeight) * positioner.columnCount,
-        );
         const batchSize = Math.min(
-            itemCount - firstUnmeasuredIndex,
-            Math.max(minimumBatchSize, estimatedBatchSize),
+            itemCount - unmeasuredStart,
+            Math.max(
+                unmeasuredStart === 0 ? positioner.columnCount : 0,
+                Math.ceil(((rangeEnd - minCol) / (itemAvg + rowGap)) * positioner.columnCount),
+            ),
         );
         if (batchSize > 0) {
-            const end = firstUnmeasuredIndex + batchSize;
-            for (let index = firstUnmeasuredIndex; index < end; index += 1) {
+            const end = unmeasuredStart + batchSize;
+            for (let index = unmeasuredStart; index < end; index += 1) {
                 appendSlot(index, null, true);
             }
         }
     }
 
-    const height = Math.ceil(positioner.estimateHeight(itemCount, normalizedItemHeight));
+    const height = Math.ceil(positioner.estimateHeight(itemCount, itemAvg));
 
     const defaultProps: MasonrySlotAttributes = {
         children: positionedChildren,
