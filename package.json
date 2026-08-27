@@ -1,5 +1,5 @@
 {
-    "version": "2.3.0",
+    "version": "2.4.0",
     "description": "A responsive, highly optimized, masonry layout component with virtualization built for React 19 and Base UI",
     "name": "base-ui-masonry",
     "license": "MIT",
@@ -38,7 +38,7 @@
         "@types/bun": "latest",
         "@types/node": "^25.6.2",
         "@types/react": "^19.2.18",
-        "@types/react-dom": "^19.2.4",
+        "@types/react-dom": "^19.2.5",
         "babel-plugin-react-compiler": "^1.0.0",
         "mitata": "^1.0.34",
         "typescript": "7.0.2"
