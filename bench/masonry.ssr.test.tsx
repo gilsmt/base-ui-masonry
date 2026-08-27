@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { renderToString } from "react-dom/server";
-import { MasonryItem, MasonryRoot } from "./masonry.tsx";
+import { MasonryItem, MasonryRoot } from "../src/masonry.tsx";
 
 function makeItems(count: number) {
     return Array.from({ length: count }, (_, index) => (

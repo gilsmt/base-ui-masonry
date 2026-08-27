@@ -56,6 +56,6 @@
         "preserveWatchOutput": true,
         "incremental": true,
     },
-    "include": ["src"],
+    "include": ["src", "bench"],
     "exclude": ["node_modules", "playground", "dist"],
 }
