@@ -545,7 +545,7 @@ function useMeasurements(
 
         const win = ownerWindow(container);
         return mergeCleanups(
-            addEventListener(scrollElement ?? win, "scroll", scheduleSync, { passive: true }),
+            addEventListener(scrollElement ?? win, "scroll", requestSync, { passive: true }),
             addEventListener(win, "resize", scheduleSync),
             addEventListener(win, "orientationchange", scheduleSync),
             win.visualViewport
