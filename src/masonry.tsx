@@ -52,16 +52,6 @@ function getNodeDataIndex(node: Element): number | null {
     return index >>> 0 === index ? index : null;
 }
 
-function parseGapDirectionalValues(gap: number | { horizontal: number; vertical: number }) {
-    if (gap && typeof gap === "object") {
-        return {
-            horizontalGap: gap.horizontal,
-            verticalGap: gap.vertical,
-        };
-    }
-    return { horizontalGap: gap, verticalGap: gap };
-}
-
 function parseFiniteNumber(value: number | undefined, min: number, fallback: number) {
     return typeof value === "number" && Number.isFinite(value) ? Math.max(min, value) : fallback;
 }
@@ -72,6 +62,16 @@ function parsePositiveFiniteNumber(value: number | undefined, fallback: number) 
 
 function parseMeasuredItemHeight(value: number | undefined) {
     return parsePositiveFiniteNumber(value, 1);
+}
+
+function parseGapDirectionalValues(gap: number | { horizontal: number; vertical: number }) {
+    if (gap && typeof gap === "object") {
+        return {
+            horizontalGap: gap.horizontal,
+            verticalGap: gap.vertical,
+        };
+    }
+    return { horizontalGap: gap, verticalGap: gap };
 }
 
 interface WindowRange {
