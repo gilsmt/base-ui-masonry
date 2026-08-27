@@ -45,11 +45,11 @@ const MasonryDataAttributes = {
 
 function getNodeDataIndex(node: Element): number | null {
     const attr = node.getAttribute(MasonryDataAttributes.index);
-    if (attr === null) {
-        return null;
+    if (!attr) {
+        throw new Error(`MasonryRoot node ${node} does not have a data-index attribute`);
     }
     const index = Number(attr);
-    return Number.isInteger(index) && index >= 0 ? index : null;
+    return index >>> 0 === index ? index : null;
 }
 
 function parseGapDirectionalValues(gap: number | { horizontal: number; vertical: number }) {
@@ -367,7 +367,7 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
 /* --------------------------------- Measurements --------------------------------- */
 
 function useItemResizeObserver(
-    callbackFn: (index: number, node: HTMLElement, height: number) => void,
+    callbackFn: (index: number, node: Element, height: number) => void,
 ): ResizeObserver | null {
     const resizeObserver = useRefWithInit(() => {
         if (typeof ResizeObserver !== "function") {
@@ -376,17 +376,11 @@ function useItemResizeObserver(
 
         function handleResizeObserver(entries: ResizeObserverEntry[]) {
             for (const entry of entries) {
-                const target = entry.target as HTMLElement;
-                const attributeIndex = getNodeDataIndex(target);
-                if (attributeIndex === null) {
+                const attrIndex = getNodeDataIndex(entry.target);
+                if (attrIndex === null) {
                     continue;
                 }
-                const blockSize = entry.borderBoxSize?.[0]?.blockSize;
-                const height =
-                    typeof blockSize === "number" && Number.isFinite(blockSize)
-                        ? blockSize
-                        : target.offsetHeight;
-                callbackFn(attributeIndex, target, height);
+                callbackFn(attrIndex, entry.target, entry.borderBoxSize[0].blockSize);
             }
         }
 
@@ -565,7 +559,7 @@ interface MasonrySlotAttributes extends MasonryItemSlotProps {
 
 interface PendingItemMeasurement {
     height: number;
-    node: HTMLElement;
+    node: Element;
 }
 
 export interface ItemSlotProps {
@@ -836,7 +830,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const itemCount = validChildren.length;
 
     const queueMeasurementCommit = useStableCallback(
-        (index: number, node: HTMLElement, height: number) => {
+        (index: number, node: Element, height: number) => {
             pendingRef.current.set(index, { height, node });
             requestSync(); // Item-height events never flag DOM geometry dirty
         },
@@ -845,11 +839,11 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const resizeObserver = useItemResizeObserver(queueMeasurementCommit);
 
     const registerItemNode = useStableCallback((index: number, node: HTMLElement) => {
-        if (!(node instanceof Element)) {
-            return undefined;
+        if (resizeObserver) {
+            resizeObserver.observe(node);
+        } else {
+            queueMeasurementCommit(index, node, node.getBoundingClientRect().height);
         }
-        resizeObserver?.observe(node);
-        queueMeasurementCommit(index, node, node.offsetHeight);
         return () => {
             resizeObserver?.unobserve(node);
             if (pendingRef.current.get(index)?.node === node) {
