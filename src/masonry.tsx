@@ -888,23 +888,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
                 pendingRef.current.clear();
                 resetCountRef.current.value += 1;
                 nextPositioner = buildPositioner(latestOptions);
-                const container = containerRef.current;
-                if (container) {
-                    const nodeByIndex = new Map<number, HTMLElement>();
-                    for (const child of Array.from(container.children)) {
-                        const childIndex = getNodeDataIndex(child);
-                        if (childIndex !== null && !nodeByIndex.has(childIndex)) {
-                            nodeByIndex.set(childIndex, child as HTMLElement);
-                        }
-                    }
-                    for (let index = 0; index < itemCount; index += 1) {
-                        const node = nodeByIndex.get(index);
-                        if (!node) {
-                            break;
-                        }
-                        nextPositioner.set(node.offsetHeight);
-                    }
-                }
             } else {
                 nextPositioner = rebuildPositioner(positionerRef.current, latestOptions);
             }
