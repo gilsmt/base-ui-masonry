@@ -29,7 +29,7 @@
         "noUncheckedSideEffectImports": true,
         "noUnusedParameters": true,
         "noUnusedLocals": true,
-        "noUncheckedIndexedAccess": true,
+        "noUncheckedIndexedAccess": false,
         "noImplicitThis": true,
         "noImplicitOverride": true,
         "noEmitOnError": true,
@@ -46,7 +46,7 @@
         /* Bundled projects */
         "removeComments": true,
         "lib": ["dom", "dom.iterable", "ESNext"],
-        "types": ["bun"],
+        "types": ["bun", "react", "react-dom"],
         "noEmit": true,
         "module": "ESNext",
         "moduleResolution": "bundler",

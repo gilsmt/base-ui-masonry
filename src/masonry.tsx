@@ -116,15 +116,10 @@ interface PositionerOptions {
     verticalGap?: number;
 }
 
-function getValue<T>(values: readonly T[], index: number): T {
-    return values[index]!;
-}
-
 function findShortestColumn(columnHeights: readonly number[]): { height: number; index: number } {
     let shortestIndex = 0;
     let shortestHeight = Number.POSITIVE_INFINITY;
-    const entries = columnHeights.entries();
-    for (const [columnIndex, columnHeight] of entries) {
+    for (const [columnIndex, columnHeight] of columnHeights.entries()) {
         if (columnHeight < shortestHeight) {
             shortestHeight = columnHeight;
             shortestIndex = columnIndex;
@@ -133,12 +128,12 @@ function findShortestColumn(columnHeights: readonly number[]): { height: number;
     return { height: shortestHeight, index: shortestIndex };
 }
 
-function findFirstIndex(values: readonly number[], satisfies: (value: number) => boolean): number {
+function findFirstIndex(values: readonly number[], target: number, inclusive: boolean): number {
     let start = 0;
     let end = values.length;
     while (start < end) {
         const middle = (start + end) >>> 1;
-        if (satisfies(getValue(values, middle))) {
+        if (inclusive ? values[middle] >= target : values[middle] > target) {
             end = middle;
         } else {
             start = middle + 1;
@@ -153,10 +148,10 @@ function findFirstOverlappingRow(
     itemHeights: readonly number[],
     low: number,
 ): number {
-    const row = findFirstIndex(tops, (top) => top >= low);
+    const row = findFirstIndex(tops, low, true);
     if (row > 0) {
-        const itemAbove = getValue(items, row - 1);
-        if (getValue(tops, row - 1) + getValue(itemHeights, itemAbove) >= low) {
+        const itemAbove = items[row - 1];
+        if (tops[row - 1] + itemHeights[itemAbove] >= low) {
             return row - 1;
         }
     }
@@ -220,15 +215,15 @@ export function buildPositioner(options: PositionerOptions) {
     const itemHeights: number[] = [];
 
     function createPlacement(index: number): PositionerItem {
-        const columnIndex = getValue(itemColumns, index);
-        const row = getValue(itemRows, index);
+        const columnIndex = itemColumns[index];
+        const row = itemRows[index];
         return {
             columnIndex,
             columnItemIndex: row,
-            height: getValue(itemHeights, index),
+            height: itemHeights[index],
             index,
             left: columnIndex * stride,
-            top: getValue(getValue(columnTops, columnIndex), row),
+            top: columnTops[columnIndex][row],
         };
     }
 
@@ -252,17 +247,17 @@ export function buildPositioner(options: PositionerOptions) {
 
     function range(low: number, high: number, visitItem: (item: PositionerItem) => void) {
         for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
-            const columnItems = getValue(columns, columnIndex);
-            const tops = getValue(columnTops, columnIndex);
+            const columnItems = columns[columnIndex];
+            const tops = columnTops[columnIndex];
             for (
                 let row = findFirstOverlappingRow(tops, columnItems, itemHeights, low);
                 row < columnItems.length;
                 row += 1
             ) {
-                if (getValue(tops, row) > high) {
+                if (tops[row] > high) {
                     break;
                 }
-                visitItem(createPlacement(getValue(columnItems, row)));
+                visitItem(createPlacement(columnItems[row]));
             }
         }
     }
@@ -270,13 +265,13 @@ export function buildPositioner(options: PositionerOptions) {
     function set(height: number) {
         const itemHeight = parseMeasuredItemHeight(height);
         const columnIndex = findShortestColumn(columnHeights).index;
-        const columnItems = getValue(columns, columnIndex);
-        const top = columnItems.length > 0 ? getValue(columnHeights, columnIndex) + rowGap : 0;
+        const columnItems = columns[columnIndex];
+        const top = columnItems.length > 0 ? columnHeights[columnIndex] + rowGap : 0;
         itemColumns.push(columnIndex);
         itemRows.push(columnItems.length);
         itemHeights.push(itemHeight);
         columnItems.push(itemHeights.length - 1);
-        getValue(columnTops, columnIndex).push(top);
+        columnTops[columnIndex].push(top);
         columnHeights[columnIndex] = top + itemHeight;
     }
 
@@ -292,17 +287,16 @@ export function buildPositioner(options: PositionerOptions) {
         if (previous.start === next.start && previous.end === next.end) {
             return true;
         }
-        if (size() === 0 || !(shortestColumn() >= next.end)) {
+        if (size() === 0 || shortestColumn() < next.end) {
             return false;
         }
         for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
-            const tops = getValue(columnTops, columnIndex);
-            const columnItems = getValue(columns, columnIndex);
-            const row = findFirstOverlappingRow(tops, columnItems, itemHeights, previous.start);
+            const tops = columnTops[columnIndex];
+            const columnItems = columns[columnIndex];
             if (
-                row !== findFirstOverlappingRow(tops, columnItems, itemHeights, next.start) ||
-                findFirstIndex(tops, (top) => top > previous.end) !==
-                    findFirstIndex(tops, (top) => top > next.end)
+                findFirstOverlappingRow(tops, columnItems, itemHeights, previous.start) !==
+                    findFirstOverlappingRow(tops, columnItems, itemHeights, next.start) ||
+                findFirstIndex(tops, previous.end, false) !== findFirstIndex(tops, next.end, false)
             ) {
                 return false;
             }
@@ -312,42 +306,33 @@ export function buildPositioner(options: PositionerOptions) {
 
     function update(updates: readonly PositionerUpdate[]) {
         const firstChangedRows: number[] = new Array(columnCount).fill(-1);
-        const lastChangedRows: number[] = new Array(columnCount).fill(-1);
         for (const { index, height } of updates) {
             const itemHeight = parseMeasuredItemHeight(height);
-            if (getValue(itemHeights, index) === itemHeight) {
+            if (itemHeights[index] === itemHeight) {
                 continue;
             }
             itemHeights[index] = itemHeight;
-            const columnIndex = getValue(itemColumns, index);
-            const row = getValue(itemRows, index);
-            const firstChangedRow = getValue(firstChangedRows, columnIndex);
-            if (firstChangedRow < 0 || row < firstChangedRow) {
+            const columnIndex = itemColumns[index];
+            const row = itemRows[index];
+            const current = firstChangedRows[columnIndex];
+            if (current < 0 || row < current) {
                 firstChangedRows[columnIndex] = row;
-            }
-            if (row > getValue(lastChangedRows, columnIndex)) {
-                lastChangedRows[columnIndex] = row;
             }
         }
         for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
-            const startRow = getValue(firstChangedRows, columnIndex);
+            const startRow = firstChangedRows[columnIndex];
             if (startRow < 0) {
                 continue;
             }
-            const columnItems = getValue(columns, columnIndex);
-            const tops = getValue(columnTops, columnIndex);
-            const lastChangedRow = Math.max(startRow, getValue(lastChangedRows, columnIndex));
-            let top = getValue(tops, startRow);
+            const columnItems = columns[columnIndex];
+            const tops = columnTops[columnIndex];
+            let top = tops[startRow];
             for (let row = startRow; row < columnItems.length; row += 1) {
-                if (row > lastChangedRow && getValue(tops, row) === top) {
-                    break;
-                }
                 tops[row] = top;
-                top += getValue(itemHeights, getValue(columnItems, row)) + rowGap;
+                top += itemHeights[columnItems[row]] + rowGap;
             }
             const lastRow = columnItems.length - 1;
-            columnHeights[columnIndex] =
-                getValue(tops, lastRow) + getValue(itemHeights, getValue(columnItems, lastRow));
+            columnHeights[columnIndex] = tops[lastRow] + itemHeights[columnItems[lastRow]];
         }
     }
 
@@ -371,7 +356,10 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
     const nextPositioner = buildPositioner(options);
     const measuredItemCount = previousPositioner.size();
     for (let index = 0; index < measuredItemCount; index += 1) {
-        nextPositioner.set(previousPositioner.get(index)!.height);
+        const item = previousPositioner.get(index);
+        if (item) {
+            nextPositioner.set(item.height);
+        }
     }
     return nextPositioner;
 }
@@ -675,8 +663,12 @@ export function commitPendingMeasurements(
 
     const indices = Array.from(pendingMeasurements.keys()).sort((a, b) => a - b);
     for (const index of indices) {
-        const measurement = pendingMeasurements.get(index)!;
-        if (!measurement.node.isConnected || getNodeDataIndex(measurement.node) !== index) {
+        const measurement = pendingMeasurements.get(index);
+        if (
+            !measurement ||
+            !measurement.node.isConnected ||
+            getNodeDataIndex(measurement.node) !== index
+        ) {
             pendingMeasurements.delete(index);
             continue;
         }
@@ -711,8 +703,7 @@ type Keys = readonly (React.Key | null)[];
 function areKeysAppendOnly(previous: Keys, next: Keys) {
     return (
         previous === next ||
-        (previous.length <= next.length &&
-            previous.every((key, index) => key === getValue(next, index)))
+        (previous.length <= next.length && previous.every((key, index) => key === next[index]))
     );
 }
 
@@ -787,8 +778,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
 
     const { horizontalGap, verticalGap } = parseGapDirectionalValues(gap);
     const itemAvg = parseFiniteNumber(rawItemHeight, 1, DEFAULT_ITEM_HEIGHT);
-    const resolvedHorizontalGap = parseFiniteNumber(horizontalGap, 0, DEFAULT_GAP);
-    const rowGap = parseFiniteNumber(verticalGap, 0, resolvedHorizontalGap);
     const maxColumnCount = parsePositiveFiniteNumber(maxColumnCountProp, Number.POSITIVE_INFINITY);
 
     const overscanValue =
@@ -827,11 +816,12 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         }),
         [columnCount, columnWidth, containerWidth, horizontalGap, maxColumnCount, verticalGap],
     );
+    const currentOptions = parsePositionerOptions(latestOptions);
+    const rowGap = currentOptions.rowGap;
 
-    // Bumped on layout reset so every mounted slot re-reports its measurement
-    const resetCountRef = useRefWithInit(() => ({ value: 0 }));
+    const resetKeyRef = useRefWithInit(() => ({ value: 0 }));
     const positionerRef = useRefWithInit(() => buildPositioner(latestOptions));
-    const optionsRef = useRefWithInit(() => parsePositionerOptions(latestOptions));
+    const optionsRef = useRefWithInit(() => currentOptions);
     const keysRef = React.useRef<readonly (React.Key | null)[] | null>(null);
     const pendingRef = useRefWithInit(() => new Map<number, PendingItemMeasurement>());
     const positioner = positionerRef.current;
@@ -872,12 +862,11 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         const committedKeys = keysRef.current;
         const shouldReset = committedKeys !== null && !areKeysAppendOnly(committedKeys, keys);
 
-        const nextOptions = parsePositionerOptions(latestOptions);
         const prevOptions = optionsRef.current;
-        const shouldRebuild = !shouldReset && !areOptionsEqual(prevOptions, nextOptions);
+        const shouldRebuild = !shouldReset && !areOptionsEqual(prevOptions, currentOptions);
 
         keysRef.current = keys;
-        optionsRef.current = nextOptions;
+        optionsRef.current = currentOptions;
 
         if (shouldReset || shouldRebuild) {
             let nextPositioner: Positioner;
@@ -886,7 +875,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
                     "MasonryRoot: item keys changed by more than appending (reorder, insertion, or removal). The layout was rebuilt from mounted items; provide stable `key`s to keep reordering cheap.",
                 );
                 pendingRef.current.clear();
-                resetCountRef.current.value += 1;
+                resetKeyRef.current.value += 1;
                 nextPositioner = buildPositioner(latestOptions);
             } else {
                 nextPositioner = rebuildPositioner(positionerRef.current, latestOptions);
@@ -896,7 +885,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
             rerender();
             scheduleSync();
         }
-    }, [keys, itemCount, latestOptions, rerender, scheduleSync]);
+    }, [keys, itemCount, latestOptions, currentOptions, rerender, scheduleSync]);
 
     const unmeasuredStart = positioner.size();
     const minCol = positioner.shortestColumn();
@@ -926,7 +915,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
                 itemCount={itemCount}
                 item={item}
                 register={registerItemNode}
-                resetKey={resetCountRef.current.value}
+                resetKey={resetKeyRef.current.value}
             />,
         );
     };
