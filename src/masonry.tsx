@@ -306,6 +306,7 @@ export function buildPositioner(options: PositionerOptions) {
 
     function update(updates: readonly PositionerUpdate[]) {
         const firstChangedRows: number[] = new Array(columnCount).fill(-1);
+        const lastChangedRows: number[] = new Array(columnCount).fill(-1);
         for (const { index, height } of updates) {
             const itemHeight = parseMeasuredItemHeight(height);
             if (itemHeights[index] === itemHeight) {
@@ -318,6 +319,9 @@ export function buildPositioner(options: PositionerOptions) {
             if (current < 0 || row < current) {
                 firstChangedRows[columnIndex] = row;
             }
+            if (row > lastChangedRows[columnIndex]) {
+                lastChangedRows[columnIndex] = row;
+            }
         }
         for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
             const startRow = firstChangedRows[columnIndex];
@@ -326,8 +330,12 @@ export function buildPositioner(options: PositionerOptions) {
             }
             const columnItems = columns[columnIndex];
             const tops = columnTops[columnIndex];
+            const lastChangedRow = lastChangedRows[columnIndex];
             let top = tops[startRow];
             for (let row = startRow; row < columnItems.length; row += 1) {
+                if (row > lastChangedRow && tops[row] === top) {
+                    break;
+                }
                 tops[row] = top;
                 top += itemHeights[columnItems[row]] + rowGap;
             }

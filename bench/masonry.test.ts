@@ -215,3 +215,143 @@ describe("isWindowShiftInert", () => {
         expect(checked).toBeGreaterThan(3000);
     });
 });
+/* The incremental height reflow (`update`) short-circuits a column reflow when
+ * the cumulative delta re-winds to zero below the deepest changed row. These
+ * tests pin that optimization: the result must always equal an *in-place*
+ * re-flow (masonry never re-balances items between columns on a height change;
+ * it only re-stacks each column), and a cancelled batch must leave the
+ * untouched tail identical. */
+
+function buildFromHeights(
+    heights: readonly number[],
+    options: Parameters<typeof buildPositioner>[0],
+): ReturnType<typeof buildPositioner> {
+    const positioner = buildPositioner(options);
+    for (const height of heights) {
+        positioner.set(height);
+    }
+    return positioner;
+}
+
+describe("update()", () => {
+    test("incremental reflow reproduces an in-place re-stack (randomized)", () => {
+        const seeds = [1, 7, 42, 1337, 2026, 987654];
+        let itemChecks = 0;
+        let expectedChecks = 0;
+        for (const seed of seeds) {
+            const random = createRandom(seed);
+            for (const columnCount of [1, 2, 3]) {
+                const itemCount = 30 + Math.floor(random() * 40);
+                const horizontalGap = random() < 0.5 ? 0 : Math.floor(random() * 12);
+                const verticalGap = random() < 0.5 ? 0 : Math.floor(random() * 16);
+                const options = {
+                    columnCount,
+                    columnWidth: 140,
+                    containerWidth: columnCount * 160,
+                    horizontalGap,
+                    verticalGap,
+                };
+
+                // `baseline` records the ORIGINAL (pre-update) per-column
+                // membership: masonry never re-balances items between columns on a
+                // height change, it only re-stacks each column in place.
+                const positioner = buildPositioner(options);
+                const baseline = buildPositioner(options);
+                // `expectedHeights` is tracked independently of `update`'s internal
+                // state, so the oracle would detect a height that never got applied.
+                const expectedHeights: number[] = [];
+                for (let index = 0; index < itemCount; index += 1) {
+                    const height = 20 + Math.floor(random() * 400);
+                    positioner.set(height);
+                    baseline.set(height);
+                    expectedHeights.push(height);
+                }
+
+                const updates: Array<{ index: number; height: number }> = [];
+                const batchSize = 1 + Math.floor(random() * columnCount * 4);
+                for (let u = 0; u < batchSize; u += 1) {
+                    const index = Math.floor(random() * itemCount);
+                    const height = 20 + Math.floor(random() * 400);
+                    updates.push({ index, height });
+                    expectedHeights[index] = height;
+                }
+
+                positioner.update(updates);
+
+                // In-place oracle: keep each item's original column (baseline
+                // records the pre-update placement), re-stack every column
+                // bottom-up with the independently tracked NEW heights.
+                const columnItems: number[][] = Array.from({ length: columnCount }, () => []);
+                for (let index = 0; index < itemCount; index += 1) {
+                    columnItems[baseline.get(index)!.columnIndex].push(index);
+                }
+                let shortestExpected = Number.POSITIVE_INFINITY;
+                let expectedChecksThisRun = 0;
+                for (const items of columnItems) {
+                    let cursor = 0;
+                    let bottom = 0;
+                    for (const index of items) {
+                        const height = expectedHeights[index];
+                        expect(positioner.get(index)!.top).toBe(cursor);
+                        cursor += height + verticalGap;
+                        bottom = cursor - verticalGap;
+                        itemChecks += 1;
+                        expectedChecksThisRun += 1;
+                    }
+                    shortestExpected = Math.min(shortestExpected, bottom);
+                }
+                // Every item lives in exactly one column, so coverage must match.
+                expect(expectedChecksThisRun).toBe(itemCount);
+                // The early-break must not corrupt the per-column `columnHeights`
+                // recompute, which drives the next `set()` placement.
+                expect(positioner.shortestColumn()).toBe(shortestExpected);
+                expectedChecks += expectedChecksThisRun;
+            }
+        }
+        expect(itemChecks).toBe(expectedChecks);
+    });
+
+    test("a cancelled batch re-winds the delta and leaves the tail untouched", () => {
+        // 1 column, 0 gap: fully deterministic. Item 2 grows by +20, item 3
+        // shrinks by -20, so after row 3 the running delta is zero again and
+        // rows 4.. keep their old tops.
+        const positioner = buildFromHeights([100, 100, 100, 100, 100], {
+            columnCount: 1,
+            columnWidth: 132,
+            containerWidth: 132,
+            horizontalGap: 0,
+            verticalGap: 0,
+        });
+
+        const tailBefore = [positioner.get(3)!.top, positioner.get(4)!.top];
+        positioner.update([
+            { index: 2, height: 120 },
+            { index: 3, height: 80 },
+        ]);
+
+        expect(positioner.get(2)!.top).toBe(200);
+        expect(positioner.get(2)!.height).toBe(120);
+        expect(positioner.get(3)!.top).toBe(320);
+        expect(positioner.get(4)!.top).toBe(tailBefore[1]);
+        expect(positioner.size()).toBe(5);
+    });
+
+    test("per-column early-break keeps the untouched tail when only the tail changes", () => {
+        const positioner = buildFromHeights([100, 100, 100, 100, 100], {
+            columnCount: 1,
+            columnWidth: 132,
+            containerWidth: 132,
+            horizontalGap: 0,
+            verticalGap: 0,
+        });
+        const precedingTops = [0, 1, 2, 3].map(
+            (index) => positioner.get(index)!.top,
+        );
+        positioner.update([{ index: 4, height: 500 }]);
+        expect([0, 1, 2, 3].map((index) => positioner.get(index)!.top)).toEqual(
+            precedingTops,
+        );
+        expect(positioner.get(4)!.top).toBe(400);
+        expect(positioner.get(4)!.height).toBe(500);
+    });
+});
