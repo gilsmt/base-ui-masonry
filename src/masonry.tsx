@@ -237,8 +237,7 @@ export function buildPositioner(options: PositionerOptions) {
                     break;
                 }
                 const idx = columnItems[row];
-                const col = itemColumns[idx];
-                visitItem(idx, col * stride, columnTops[col][itemRows[idx]], itemHeights[idx]);
+                visitItem(idx, columnIndex * stride, tops[row], itemHeights[idx]);
             }
         }
     }

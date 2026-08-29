@@ -263,9 +263,7 @@ export function buildPositioner(options: PositionerOptions) {
                     break;
                 }
                 const idx = getItem(columnItems, row);
-                const col = getItem(itemColumns, idx);
-                const r = getItem(itemRows, idx);
-                visitItem(idx, col * stride, getItem(getItem(columnTops, col), r), getItem(itemHeights, idx));
+                visitItem(idx, columnIndex * stride, getItem(tops, row), getItem(itemHeights, idx));
             }
         }
     }
