@@ -13,14 +13,13 @@
 import * as React from "react";
 import {
     areItemSlotPropsEqual,
-    arePlacementsEqual,
     buildPositioner,
-    getWindowRange,
 } from "../src/masonry.tsx";
 import {
     buildFilled as buildFilledCopy,
     getColumnTops,
     getItem,
+    getWindowRange,
     makeHeights,
     VIEWPORT_HEIGHT,
     OVERSCAN,
@@ -60,7 +59,7 @@ function findInertPair(shiftPx: number): { rest: WindowRange; shifted: WindowRan
         if (!bandHasTop(start) && !bandHasTop(scrollTop + span)) {
             const rest = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
             const shifted = getWindowRange(scrollTop + shiftPx, VIEWPORT_HEIGHT, OVERSCAN);
-            if (filled.isWindowShiftInert(rest, shifted)) return { rest, shifted };
+            if (filled.isWindowShiftInert(rest.start, rest.end, shifted.start, shifted.end)) return { rest, shifted };
         }
     }
     throw new Error(`no inert pair for ${shiftPx}px`);
@@ -116,7 +115,7 @@ function boundaryCrossingRange(
             }
         }
         if (!onlyTarget) continue;
-        if (filled.isWindowShiftInert(previous, next)) throw new Error("unexpected inert");
+        if (filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end)) throw new Error("unexpected inert");
         return { previous, next };
     }
     throw new Error(`no isolated ${boundary} crossing for col ${targetColumn}`);
@@ -133,7 +132,7 @@ const CROSSING_LAST = boundaryCrossingRange(filled.columnCount - 1, "end");
 
 function renderedIndices(range: WindowRange): number[] {
     const out: number[] = [];
-    filled.range(range.start, range.end, (item) => out.push(item.index));
+    filled.range(range.start, range.end, (index) => out.push(index));
     return out.sort((a, b) => a - b);
 }
 
@@ -154,7 +153,7 @@ function simulateScrollRenderCounts(pxPerSecond: number) {
 
     for (let scrollTop = 5_000; scrollTop < totalHeight - VIEWPORT_HEIGHT; scrollTop += step) {
         const nextRange = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
-        const isInert = filled.isWindowShiftInert(prevRange, nextRange);
+        const isInert = filled.isWindowShiftInert(prevRange.start, prevRange.end, nextRange.start, nextRange.end);
         if (isInert) inert++;
         else {
             nonInert++;
@@ -187,7 +186,7 @@ function countUseMeasurementsSkips() {
     let skipped = 0,
         flushed = 0;
     for (const [, prev, next, shouldSkip] of cases) {
-        const isInert = filled.isWindowShiftInert(prev, next);
+        const isInert = filled.isWindowShiftInert(prev.start, prev.end, next.start, next.end);
         if (isInert !== shouldSkip) throw new Error("fixture mismatch");
         if (isInert) skipped++;
         else flushed++;
@@ -209,9 +208,11 @@ function countUseMeasurementsSkips() {
 function probeItemSlotMemo() {
     const dummyChild = React.createElement("div", null, "x") as React.ReactElement<any>;
     const dummyRegister = (() => () => {}) as any;
-    const itemA = filled.get(0)!;
-    const itemB = { ...itemA }; // same placement, different object identity
-    const itemC = { ...itemA, top: itemA.top + 1 }; // different placement
+    const itemA_top = filled.getTop(0)!;
+    const itemA_left = filled.getLeft(0)!;
+    const itemA_height = filled.getHeight(0)!;
+    const itemB = { left: itemA_left, top: itemA_top, height: itemA_height };
+    const itemC = { left: itemA_left, top: itemA_top + 1, height: itemA_height };
 
     const baseProps = {
         child: dummyChild,
@@ -219,14 +220,16 @@ function probeItemSlotMemo() {
         index: 0,
         inert: false,
         itemCount: N,
-        item: itemA,
+        left: itemA_left,
+        top: itemA_top,
+        height: itemA_height,
         register: dummyRegister,
         resetKey: 0,
     };
 
     const cases: [string, any, any, boolean][] = [
-        ["identical placement (memo hit)", baseProps, { ...baseProps, item: itemB }, true],
-        ["different placement (miss)", baseProps, { ...baseProps, item: itemC }, false],
+        ["identical placement (memo hit)", baseProps, { ...baseProps, left: itemB.left, top: itemB.top, height: itemB.height }, true],
+        ["different placement (miss)", baseProps, { ...baseProps, left: itemC.left, top: itemC.top, height: itemC.height }, false],
         [
             "different child (miss)",
             baseProps,
@@ -236,8 +239,8 @@ function probeItemSlotMemo() {
         ["different width (miss)", baseProps, { ...baseProps, width: 199 }, false],
         ["inert flip (miss)", baseProps, { ...baseProps, inert: true }, false],
         ["resetKey bump (miss)", baseProps, { ...baseProps, resetKey: 1 }, false],
-        ["null vs valued (miss)", { ...baseProps, item: null }, baseProps, false],
-        ["null vs null (hit)", { ...baseProps, item: null }, { ...baseProps, item: null }, true],
+        ["null vs valued (miss)", { ...baseProps, left: null, top: null, height: null }, baseProps, false],
+        ["null vs null (hit)", { ...baseProps, left: null, top: null, height: null }, { ...baseProps, left: null, top: null, height: null }, true],
     ];
 
     let hits = 0,
@@ -249,14 +252,11 @@ function probeItemSlotMemo() {
             throw new Error(
                 `areItemSlotPropsEqual failed: ${name} expected ${expectHit} got ${hit}`,
             );
-        // Also validate arePlacementsEqual for item pairs
-        if (prev.item && next.item) {
-            const equal = arePlacementsEqual(prev.item, next.item);
-            const expectEqual =
-                prev.item.top === next.item.top &&
-                prev.item.left === next.item.left &&
-                prev.item.height === next.item.height;
-            if (equal !== expectEqual) throw new Error(`arePlacementsEqual failed: ${name}`);
+        // Validate scalar left/top/height equality
+        if (prev.left !== undefined && next.left !== undefined) {
+            const equal = prev.left === next.left && prev.top === next.top && prev.height === next.height;
+            const expectEqual = prev.left === next.left && prev.top === next.top && prev.height === next.height;
+            if (equal !== expectEqual) throw new Error(`scalar equality failed: ${name}`);
         }
         if (hit) hits++;
         else misses++;
@@ -296,7 +296,7 @@ const singleCases: [string, WindowRange, WindowRange][] = [
     ["last-col crossing (+4px, full scan)", CROSSING_LAST.previous, CROSSING_LAST.next],
 ];
 for (const [name, prev, next] of singleCases) {
-    const isInert = filled.isWindowShiftInert(prev, next);
+    const isInert = filled.isWindowShiftInert(prev.start, prev.end, next.start, next.end);
     const prevN = rangeSize(prev);
     const nextN = rangeSize(next);
     const prevSet = new Set(renderedIndices(prev));
@@ -342,9 +342,9 @@ console.log("\n[commitPendingMeasurements · batch dedup — positioner work]");
         { index: 5, height: 400 },
         { index: 20, height: 250 },
     ];
-    const before = p.get(5)!.height;
+    const before = p.getHeight(5)!;
     p.update(dupUpdates);
-    const after = p.get(5)!.height;
+    const after = p.getHeight(5)!;
     console.log(
         `  duplicate index in batch: height ${before} -> ${after} (last write wins, deterministic)`,
     );

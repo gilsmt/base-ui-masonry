@@ -3,8 +3,9 @@
  *
  * The positioner under test is a verbatim copy of src/masonry.tsx's
  * "Positioner" section (plus getWindowRange/getScrollTop), kept in
- * bench/positioner.ts. Re-copied 2026-08-26 after the window-shift inertia
- * optimization (#2) and the allocation-free scalar-array reflow (#3) landed.
+ * bench/positioner.ts. Re-copied 2026-08-29 after scalar range/guard/getHeight
+ * (#4) — findShortestColumnIndex, range(index,left,top,height), getHeight,
+ * isWindowShiftInert(start,end,start,end) allocation-free.
  *
  * WHY DETERMINISTIC: render counts (inert vs non-inert decisions, items
  * visited by range(), items rewritten by update()) are fully deterministic
@@ -81,7 +82,7 @@ function findInertPair(shiftPx: number): { rest: WindowRange; shifted: WindowRan
         if (!bandHasTop(start) && !bandHasTop(scrollTop + span)) {
             const rest = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
             const shifted = getWindowRange(scrollTop + shiftPx, VIEWPORT_HEIGHT, OVERSCAN);
-            if (filled.isWindowShiftInert(rest, shifted)) {
+            if (filled.isWindowShiftInert(rest.start, rest.end, shifted.start, shifted.end)) {
                 return { rest, shifted };
             }
         }
@@ -173,7 +174,7 @@ function boundaryCrossingRange(
         }
         if (!onlyTargetDiffers) continue;
 
-        if (filled.isWindowShiftInert(previous, next)) {
+        if (filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end)) {
             throw new Error("constructed crossing unexpectedly reported inert");
         }
         return { previous, next };
@@ -184,10 +185,10 @@ function boundaryCrossingRange(
 const CROSSING_COL0 = boundaryCrossingRange(0, "start");
 const CROSSING_LAST = boundaryCrossingRange(filled.columnCount - 1, "end");
 
-if (filled.isWindowShiftInert(INERT_16.rest, INERT_16.shifted) !== true) {
+if (filled.isWindowShiftInert(INERT_16.rest.start, INERT_16.rest.end, INERT_16.shifted.start, INERT_16.shifted.end) !== true) {
     throw new Error("16px shift fixture should be inert");
 }
-if (filled.isWindowShiftInert(INERT_64.rest, INERT_64.shifted) !== true) {
+if (filled.isWindowShiftInert(INERT_64.rest.start, INERT_64.rest.end, INERT_64.shifted.start, INERT_64.shifted.end) !== true) {
     throw new Error("64px shift fixture should be inert");
 }
 
@@ -235,13 +236,14 @@ console.log(`  rebuildPositioner 10k         -> ${rebuildPositioner(filled, { co
 
 // 2) Scroll frames: inertia guard — the deterministic signal is the boolean decision
 console.log("\n[guard · isWindowShiftInert — deterministic booleans]");
+const _nextPastEnd = getWindowRange(totalHeight + 5_000, VIEWPORT_HEIGHT, OVERSCAN);
 const guardCases: [string, boolean][] = [
-    ["identical range (fast path)", filled.isWindowShiftInert(REST_RANGE, REST_RANGE)],
-    ["inert shift +16px (wheel tick)", filled.isWindowShiftInert(INERT_16.rest, INERT_16.shifted)],
-    ["inert shift +64px", filled.isWindowShiftInert(INERT_64.rest, INERT_64.shifted)],
-    ["non-inert: crossing in col 0 (early exit)", filled.isWindowShiftInert(CROSSING_COL0.previous, CROSSING_COL0.next)],
-    ["non-inert: crossing in last col (full scan)", filled.isWindowShiftInert(CROSSING_LAST.previous, CROSSING_LAST.next)],
-    ["past end of list (shortestColumn bail-out)", filled.isWindowShiftInert(REST_RANGE, getWindowRange(totalHeight + 5_000, VIEWPORT_HEIGHT, OVERSCAN))],
+    ["identical range (fast path)", filled.isWindowShiftInert(REST_RANGE.start, REST_RANGE.end, REST_RANGE.start, REST_RANGE.end)],
+    ["inert shift +16px (wheel tick)", filled.isWindowShiftInert(INERT_16.rest.start, INERT_16.rest.end, INERT_16.shifted.start, INERT_16.shifted.end)],
+    ["inert shift +64px", filled.isWindowShiftInert(INERT_64.rest.start, INERT_64.rest.end, INERT_64.shifted.start, INERT_64.shifted.end)],
+    ["non-inert: crossing in col 0 (early exit)", filled.isWindowShiftInert(CROSSING_COL0.previous.start, CROSSING_COL0.previous.end, CROSSING_COL0.next.start, CROSSING_COL0.next.end)],
+    ["non-inert: crossing in last col (full scan)", filled.isWindowShiftInert(CROSSING_LAST.previous.start, CROSSING_LAST.previous.end, CROSSING_LAST.next.start, CROSSING_LAST.next.end)],
+    ["past end of list (shortestColumn bail-out)", filled.isWindowShiftInert(REST_RANGE.start, REST_RANGE.end, _nextPastEnd.start, _nextPastEnd.end)],
 ];
 for (const [name, v] of guardCases) {
     console.log(`  ${name.padEnd(44)} -> ${v}`);

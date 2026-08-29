@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { buildPositioner, getWindowRange } from "../src/masonry.tsx";
+import { buildPositioner } from "../src/masonry.tsx";
+import { getWindowRange } from "./positioner.ts";
 
 /* The hysteresis decision must never miss a rendered-set change: skipping a
  * scroll update is only safe when the items overlapping the old and new
@@ -50,8 +51,8 @@ function renderedIndices(
     range: { start: number; end: number },
 ) {
     const indices: number[] = [];
-    positioner.range(range.start, range.end, (item) => {
-        indices.push(item.index);
+    positioner.range(range.start, range.end, (index) => {
+        indices.push(index);
     });
     return indices.sort((a, b) => a - b);
 }
@@ -63,8 +64,9 @@ function areIndicesEqual(first: number[], second: number[]) {
 function layoutHeight(positioner: ReturnType<typeof buildPositioner>, itemCount: number) {
     let tallest = 0;
     for (let index = 0; index < itemCount; index += 1) {
-        const item = positioner.get(index)!;
-        tallest = Math.max(tallest, item.top + item.height);
+        const top = positioner.getTop(index)!;
+        const height = positioner.getHeight(index)!;
+        tallest = Math.max(tallest, top + height);
     }
     return tallest;
 }
@@ -73,7 +75,7 @@ describe("isWindowShiftInert", () => {
     test("identical windows are always inert, even with nothing measured", () => {
         const positioner = buildPositioner({ columnCount: 2, containerWidth: 264 });
         const range = getWindowRange(500, 800, 1.5);
-        expect(positioner.isWindowShiftInert(range, range)).toBe(true);
+        expect(positioner.isWindowShiftInert(range.start, range.end, range.start, range.end)).toBe(true);
     });
 
     test("overscan Infinity produces identical windows for any scroll", () => {
@@ -81,14 +83,14 @@ describe("isWindowShiftInert", () => {
         const previous = getWindowRange(0, 800, Infinity);
         const next = getWindowRange(5000, 800, Infinity);
         expect(previous).toEqual(next);
-        expect(positioner.isWindowShiftInert(previous, next)).toBe(true);
+        expect(positioner.isWindowShiftInert(previous.start, previous.end, next.start, next.end)).toBe(true);
     });
 
     test("an empty positioner defers to the batch machinery", () => {
         const positioner = buildPositioner({ columnCount: 2, containerWidth: 264 });
         const previous = getWindowRange(0, 800, 1.5);
         const next = getWindowRange(10, 800, 1.5);
-        expect(positioner.isWindowShiftInert(previous, next)).toBe(false);
+        expect(positioner.isWindowShiftInert(previous.start, previous.end, next.start, next.end)).toBe(false);
     });
 
     test("a window reaching past the measured frontier is never inert", () => {
@@ -102,7 +104,7 @@ describe("isWindowShiftInert", () => {
         const previous = getWindowRange(0, 800, 1.5);
         const next = getWindowRange(40, 800, 1.5);
         expect(positioner.shortestColumn()).toBeLessThan(next.end);
-        expect(positioner.isWindowShiftInert(previous, next)).toBe(false);
+        expect(positioner.isWindowShiftInert(previous.start, previous.end, next.start, next.end)).toBe(false);
     });
 
     test("a shift inside the overscan margin with no boundary crossed is inert", () => {
@@ -120,7 +122,7 @@ describe("isWindowShiftInert", () => {
         const previous = getWindowRange(500, 800, 0.25);
         const next = getWindowRange(510, 800, 0.25);
         expect(positioner.shortestColumn()).toBeGreaterThanOrEqual(next.end);
-        expect(positioner.isWindowShiftInert(previous, next)).toBe(true);
+        expect(positioner.isWindowShiftInert(previous.start, previous.end, next.start, next.end)).toBe(true);
         expect(renderedIndices(positioner, previous)).toEqual(renderedIndices(positioner, next));
     });
 
@@ -139,7 +141,7 @@ describe("isWindowShiftInert", () => {
         expect(renderedIndices(positioner, previous)).not.toEqual(
             renderedIndices(positioner, next),
         );
-        expect(positioner.isWindowShiftInert(previous, next)).toBe(false);
+        expect(positioner.isWindowShiftInert(previous.start, previous.end, next.start, next.end)).toBe(false);
     });
 
     test("a bottom exiting through the trailing edge forces an update", () => {
@@ -157,7 +159,7 @@ describe("isWindowShiftInert", () => {
         const next = getWindowRange(101, 300, 0);
         expect(renderedIndices(positioner, previous)).toEqual([0, 1, 2, 3]);
         expect(renderedIndices(positioner, next)).toEqual([1, 2, 3]);
-        expect(positioner.isWindowShiftInert(previous, next)).toBe(false);
+        expect(positioner.isWindowShiftInert(previous.start, previous.end, next.start, next.end)).toBe(false);
     });
 
     test("property: against range(), true implies equal sets and differing sets imply false", () => {
@@ -197,7 +199,7 @@ describe("isWindowShiftInert", () => {
                         renderedIndices(positioner, previous),
                         renderedIndices(positioner, next),
                     );
-                    const decision = positioner.isWindowShiftInert(previous, next);
+                    const decision = positioner.isWindowShiftInert(previous.start, previous.end, next.start, next.end);
 
                     // Safety: a "skip" verdict is only ever issued for truly
                     // identical rendered sets, and a real difference is never
@@ -281,18 +283,24 @@ describe("update()", () => {
                 // In-place oracle: keep each item's original column (baseline
                 // records the pre-update placement), re-stack every column
                 // bottom-up with the independently tracked NEW heights.
-                const columnItems: number[][] = Array.from({ length: columnCount }, () => []);
+                const columnItemsByLeft = new Map<number, number[]>();
                 for (let index = 0; index < itemCount; index += 1) {
-                    columnItems[baseline.get(index)!.columnIndex].push(index);
+                    const left = baseline.getLeft(index)!;
+                    let arr = columnItemsByLeft.get(left);
+                    if (!arr) {
+                        arr = [];
+                        columnItemsByLeft.set(left, arr);
+                    }
+                    arr.push(index);
                 }
                 let shortestExpected = Number.POSITIVE_INFINITY;
                 let expectedChecksThisRun = 0;
-                for (const items of columnItems) {
+                for (const items of columnItemsByLeft.values()) {
                     let cursor = 0;
                     let bottom = 0;
                     for (const index of items) {
                         const height = expectedHeights[index];
-                        expect(positioner.get(index)!.top).toBe(cursor);
+                        expect(positioner.getTop(index)!).toBe(cursor);
                         cursor += height + verticalGap;
                         bottom = cursor - verticalGap;
                         itemChecks += 1;
@@ -323,16 +331,16 @@ describe("update()", () => {
             verticalGap: 0,
         });
 
-        const tailBefore = [positioner.get(3)!.top, positioner.get(4)!.top];
+        const tailBefore = [positioner.getTop(3)!, positioner.getTop(4)!];
         positioner.update([
             { index: 2, height: 120 },
             { index: 3, height: 80 },
         ]);
 
-        expect(positioner.get(2)!.top).toBe(200);
-        expect(positioner.get(2)!.height).toBe(120);
-        expect(positioner.get(3)!.top).toBe(320);
-        expect(positioner.get(4)!.top).toBe(tailBefore[1]);
+        expect(positioner.getTop(2)!).toBe(200);
+        expect(positioner.getHeight(2)!).toBe(120);
+        expect(positioner.getTop(3)!).toBe(320);
+        expect(positioner.getTop(4)!).toBe(tailBefore[1]);
         expect(positioner.size()).toBe(5);
     });
 
@@ -344,14 +352,10 @@ describe("update()", () => {
             horizontalGap: 0,
             verticalGap: 0,
         });
-        const precedingTops = [0, 1, 2, 3].map(
-            (index) => positioner.get(index)!.top,
-        );
+        const precedingTops = [0, 1, 2, 3].map((index) => positioner.getTop(index)!);
         positioner.update([{ index: 4, height: 500 }]);
-        expect([0, 1, 2, 3].map((index) => positioner.get(index)!.top)).toEqual(
-            precedingTops,
-        );
-        expect(positioner.get(4)!.top).toBe(400);
-        expect(positioner.get(4)!.height).toBe(500);
+        expect([0, 1, 2, 3].map((index) => positioner.getTop(index)!)).toEqual(precedingTops);
+        expect(positioner.getTop(4)!).toBe(400);
+        expect(positioner.getHeight(4)!).toBe(500);
     });
 });

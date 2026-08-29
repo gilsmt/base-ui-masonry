@@ -32,7 +32,7 @@ function simulate(name: string, pxPerSecond: number) {
 
     for (let scrollTop = 5_000; scrollTop < totalHeight - VIEWPORT_HEIGHT; scrollTop += step) {
         const next = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
-        const isInert = filled.isWindowShiftInert(previous, next);
+        const isInert = filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end);
         if (isInert) {
             inert += 1;
         } else {

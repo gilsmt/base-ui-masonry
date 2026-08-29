@@ -1,7 +1,8 @@
 /**
  * VERBATIM copy of the "Positioner" section (plus getWindowRange/getScrollTop)
- * of src/masonry.tsx as of 2026-08-26, i.e. after the window-shift inertia
- * optimization (#2) and the allocation-free scalar-array reflow (#3) landed.
+ * of src/masonry.tsx as of 2026-08-29, i.e. after scalar range/guard/getHeight
+ * (#4) — findShortestColumnIndex, range(index,left,top,height), getHeight,
+ * isWindowShiftInert(start,end,start,end) allocation-free.
  *
  * Copied because these internals are only partially exported from the module.
  * The only change: `warn` is stubbed as a noop; it fires only on degenerate
@@ -71,7 +72,7 @@ function getItem<T>(items: readonly T[], index: number): T {
     return items[index]!;
 }
 
-function findShortestColumn(columnHeights: readonly number[]): { height: number; index: number } {
+function findShortestColumnIndex(columnHeights: readonly number[]): number {
     let shortestIndex = 0;
     let shortestHeight = Number.POSITIVE_INFINITY;
     for (const [columnIndex, columnHeight] of columnHeights.entries()) {
@@ -80,7 +81,7 @@ function findShortestColumn(columnHeights: readonly number[]): { height: number;
             shortestIndex = columnIndex;
         }
     }
-    return { height: shortestHeight, index: shortestIndex };
+    return shortestIndex;
 }
 
 function findFirstIndex(values: readonly number[], satisfies: (value: number) => boolean): number {
@@ -228,7 +229,28 @@ export function buildPositioner(options: PositionerOptions) {
         return index >= 0 && index < itemHeights.length ? createPlacement(index) : undefined;
     }
 
-    function range(low: number, high: number, visitItem: (item: PositionerItem) => void) {
+    function getHeight(index: number): number | undefined {
+        return itemHeights[index];
+    }
+
+    function getTop(index: number): number | undefined {
+        const col = getItem(itemColumns, index);
+        if (col === undefined) return undefined;
+        const row = getItem(itemRows, index);
+        return getItem(getItem(columnTops, col), row);
+    }
+
+    function getLeft(index: number): number | undefined {
+        const col = getItem(itemColumns, index);
+        if (col === undefined) return undefined;
+        return col * stride;
+    }
+
+    function range(
+        low: number,
+        high: number,
+        visitItem: (index: number, left: number, top: number, height: number) => void,
+    ) {
         for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
             const columnItems = getItem(columns, columnIndex);
             const tops = getItem(columnTops, columnIndex);
@@ -240,14 +262,17 @@ export function buildPositioner(options: PositionerOptions) {
                 if (getItem(tops, row) > high) {
                     break;
                 }
-                visitItem(createPlacement(getItem(columnItems, row)));
+                const idx = getItem(columnItems, row);
+                const col = getItem(itemColumns, idx);
+                const r = getItem(itemRows, idx);
+                visitItem(idx, col * stride, getItem(getItem(columnTops, col), r), getItem(itemHeights, idx));
             }
         }
     }
 
     function set(height: number) {
         const itemHeight = parseMeasuredItemHeight(height);
-        const columnIndex = findShortestColumn(columnHeights).index;
+        const columnIndex = findShortestColumnIndex(columnHeights);
         const columnItems = getItem(columns, columnIndex);
         const top = columnItems.length > 0 ? getItem(columnHeights, columnIndex) + rowGap : 0;
         itemColumns.push(columnIndex);
@@ -259,28 +284,33 @@ export function buildPositioner(options: PositionerOptions) {
     }
 
     function shortestColumn() {
-        return findShortestColumn(columnHeights).height;
+        return getItem(columnHeights, findShortestColumnIndex(columnHeights)) ?? 0;
     }
 
     function size() {
         return itemHeights.length;
     }
 
-    function isWindowShiftInert(previous: WindowRange, next: WindowRange) {
-        if (previous.start === next.start && previous.end === next.end) {
+    function isWindowShiftInert(
+        prevStart: number,
+        prevEnd: number,
+        nextStart: number,
+        nextEnd: number,
+    ): boolean {
+        if (prevStart === nextStart && prevEnd === nextEnd) {
             return true;
         }
-        if (size() === 0 || !(shortestColumn() >= next.end)) {
+        if (size() === 0 || !(shortestColumn() >= nextEnd)) {
             return false;
         }
         for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
             const tops = getItem(columnTops, columnIndex);
             const columnItems = getItem(columns, columnIndex);
-            const row = findFirstOverlappingRow(tops, columnItems, itemHeights, previous.start);
+            const row = findFirstOverlappingRow(tops, columnItems, itemHeights, prevStart);
             if (
-                row !== findFirstOverlappingRow(tops, columnItems, itemHeights, next.start) ||
-                findFirstIndex(tops, (top) => top > previous.end) !==
-                    findFirstIndex(tops, (top) => top > next.end)
+                row !== findFirstOverlappingRow(tops, columnItems, itemHeights, nextStart) ||
+                findFirstIndex(tops, (top) => top > prevEnd) !==
+                    findFirstIndex(tops, (top) => top > nextEnd)
             ) {
                 return false;
             }
@@ -334,6 +364,9 @@ export function buildPositioner(options: PositionerOptions) {
         columnWidth,
         estimateHeight,
         get,
+        getHeight,
+        getLeft,
+        getTop,
         isWindowShiftInert,
         range,
         set,
@@ -349,7 +382,10 @@ function rebuildPositioner(previousPositioner: Positioner, options: PositionerOp
     const nextPositioner = buildPositioner(options);
     const measuredItemCount = previousPositioner.size();
     for (let index = 0; index < measuredItemCount; index += 1) {
-        nextPositioner.set(previousPositioner.get(index)!.height);
+        const height = previousPositioner.getHeight(index);
+        if (height !== undefined) {
+            nextPositioner.set(height);
+        }
     }
     return nextPositioner;
 }
