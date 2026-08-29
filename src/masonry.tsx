@@ -666,11 +666,7 @@ export function commitPendingMeasurements(
     const indices = Array.from(pendingMeasurements.keys()).sort((a, b) => a - b);
     for (const index of indices) {
         const measurement = pendingMeasurements.get(index);
-        if (
-            !measurement ||
-            !measurement.node.isConnected ||
-            getNodeDataIndex(measurement.node) !== index
-        ) {
+        if (!measurement?.node.isConnected || getNodeDataIndex(measurement.node) !== index) {
             pendingMeasurements.delete(index);
             continue;
         }
