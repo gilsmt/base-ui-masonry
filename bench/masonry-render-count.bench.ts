@@ -363,10 +363,10 @@ console.log("\n[MasonryRoot · SSR — initial ItemSlot placeholders]");
     const countPlaceholders = (html: string) =>
         (html.match(/data-slot="masonry-item"/g) ?? []).length;
     const cases: [string, number, any][] = [
-        ["default (derived 1 col)", 7, {}],
-        ["columnCount=3", 7, { columnCount: 3 }],
-        ["columnCount=8", 100, { columnCount: 8 }],
-        ["empty", 0, {}],
+        ["default (derived 1 col)", 7, { gap: 0 }],
+        ["columnCount=3", 7, { columnCount: 3, gap: 0 }],
+        ["columnCount=8", 100, { columnCount: 8, gap: 0 }],
+        ["empty", 0, { gap: 0 }],
     ];
     for (const [name, n, extra] of cases) {
         const el = React.createElement(MasonryRoot, extra, makeItems(n));

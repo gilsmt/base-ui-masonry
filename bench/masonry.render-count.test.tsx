@@ -392,22 +392,22 @@ describe("commitPendingMeasurements · batch dedup render counts", () => {
 
 describe("MasonryRoot · SSR placeholder render counts", () => {
     test("default derived columnCount renders exactly 1 placeholder ItemSlot", () => {
-        const html = renderToString(<MasonryRoot>{makeItems(7)}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot gap={0}>{makeItems(7)}</MasonryRoot>);
         expect(countPlaceholders(html)).toBe(1);
     });
 
     test("columnCount=3 renders 3 placeholders", () => {
-        const html = renderToString(<MasonryRoot columnCount={3}>{makeItems(7)}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot columnCount={3} gap={0}>{makeItems(7)}</MasonryRoot>);
         expect(countPlaceholders(html)).toBe(3);
     });
 
     test("columnCount=8 with 100 items renders 8 placeholders (one per column)", () => {
-        const html = renderToString(<MasonryRoot columnCount={8}>{makeItems(100)}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot columnCount={8} gap={0}>{makeItems(100)}</MasonryRoot>);
         expect(countPlaceholders(html)).toBe(8);
     });
 
     test("empty children renders 0 placeholders and zero-height container", () => {
-        const html = renderToString(<MasonryRoot>{[]}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot gap={0}>{[]}</MasonryRoot>);
         expect(countPlaceholders(html)).toBe(0);
         expect(html).toContain("height:0;");
     });
@@ -422,7 +422,7 @@ describe("MasonryRoot · SSR placeholder render counts", () => {
         ];
         for (const [cols, items, expected] of cases) {
             const html = renderToString(
-                <MasonryRoot columnCount={cols}>{makeItems(items)}</MasonryRoot>,
+                <MasonryRoot columnCount={cols} gap={0}>{makeItems(items)}</MasonryRoot>,
             );
             expect(countPlaceholders(html)).toBe(expected);
         }

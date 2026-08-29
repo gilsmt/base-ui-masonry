@@ -20,14 +20,14 @@ test("test runtime has no DOM globals (keeps these tests honest)", () => {
 
 describe("determinism", () => {
     test("identical props render byte-identical HTML", () => {
-        const element = <MasonryRoot columnCount={2}>{makeItems(7)}</MasonryRoot>;
+        const element = <MasonryRoot columnCount={2} gap={0}>{makeItems(7)}</MasonryRoot>;
         expect(renderToString(element)).toBe(renderToString(element));
     });
 });
 
 describe("placeholder batch", () => {
     test("default render emits exactly one hidden, inert placeholder", () => {
-        const html = renderToString(<MasonryRoot>{makeItems(7)}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot gap={0}>{makeItems(7)}</MasonryRoot>);
 
         expect(countPlaceholders(html)).toBe(1);
         expect(html).toContain('data-index="0"');
@@ -43,7 +43,7 @@ describe("placeholder batch", () => {
     });
 
     test("explicit columnCount scales the SSR batch", () => {
-        const html = renderToString(<MasonryRoot columnCount={3}>{makeItems(7)}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot columnCount={3} gap={0}>{makeItems(7)}</MasonryRoot>);
 
         expect(countPlaceholders(html)).toBe(3);
         expect(html).toContain('data-index="2"');
@@ -51,7 +51,7 @@ describe("placeholder batch", () => {
     });
 
     test("aria positions reflect the full list, not the window", () => {
-        const html = renderToString(<MasonryRoot columnCount={2}>{makeItems(5)}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot columnCount={2} gap={0}>{makeItems(5)}</MasonryRoot>);
 
         expect(html).toContain('aria-posinset="2" aria-setsize="5"');
     });
@@ -60,7 +60,7 @@ describe("placeholder batch", () => {
 describe("estimated container height", () => {
     test("defaults: ceil(rows × itemHeight)", () => {
         // 7 items ÷ 1 derived column × 300px default itemHeight
-        const html = renderToString(<MasonryRoot>{makeItems(7)}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot gap={0}>{makeItems(7)}</MasonryRoot>);
         expect(html).toContain("height:2100px");
     });
 
@@ -75,7 +75,7 @@ describe("estimated container height", () => {
     });
 
     test("empty list renders a zero-height root and skips the measuring state", () => {
-        const html = renderToString(<MasonryRoot>{[]}</MasonryRoot>);
+        const html = renderToString(<MasonryRoot gap={0}>{[]}</MasonryRoot>);
 
         expect(html).toContain("height:0;");
         expect(countPlaceholders(html)).toBe(0);
@@ -86,7 +86,7 @@ describe("estimated container height", () => {
 describe("children handling", () => {
     test("non-element children are ignored by the SSR output", () => {
         const html = renderToString(
-            <MasonryRoot columnCount={2}>
+            <MasonryRoot columnCount={2} gap={0}>
                 {["string", 42, null, true, <MasonryItem key="only">real</MasonryItem>]}
             </MasonryRoot>,
         );
@@ -98,7 +98,7 @@ describe("children handling", () => {
 
     test("slots keep their roles and data attributes", () => {
         const html = renderToString(
-            <MasonryRoot columnCount={1}>
+            <MasonryRoot columnCount={1} gap={0}>
                 <MasonryItem key="a">a</MasonryItem>
             </MasonryRoot>,
         );

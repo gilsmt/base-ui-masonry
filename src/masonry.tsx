@@ -18,8 +18,6 @@ import { flushSync } from "react-dom";
 
 const DEFAULT_COLUMN_WIDTH = 200;
 
-const DEFAULT_GAP = 0;
-
 const DEFAULT_ITEM_HEIGHT = 300;
 
 const DEFAULT_OVERSCAN = 1.5;
@@ -150,7 +148,7 @@ function parsePositionerOptions({
 }: PositionerOptions) {
     const width = parsePositiveFiniteNumber(containerWidth, 0);
     const rawItemWidth = parsePositiveFiniteNumber(preferredWidth, DEFAULT_COLUMN_WIDTH);
-    const columnGap = parseFiniteNumber(horizontalGap, 0, DEFAULT_GAP);
+    const columnGap = parseFiniteNumber(horizontalGap, 0, 0);
     const rowGap = parseFiniteNumber(verticalGap, 0, columnGap);
 
     const itemWidth = Math.max(MINIMUM_COLUMN_WIDTH, rawItemWidth);
@@ -708,9 +706,8 @@ export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRoo
     /**
      * Gap between columns and rows, or directional gaps as an object. When an
      * object is provided, `vertical` defaults to `horizontal`.
-     * @default 0
      */
-    gap?: number | { horizontal: number; vertical: number };
+    gap: number | { horizontal: number; vertical: number };
     /**
      * Assumed average item height for container-height and batch-size estimates while
      * items are still being measured. @default 300
@@ -745,7 +742,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         children,
         columnCount,
         columnWidth = DEFAULT_COLUMN_WIDTH,
-        gap = DEFAULT_GAP,
+        gap,
         itemHeight: rawItemHeight = DEFAULT_ITEM_HEIGHT,
         maxColumnCount: maxColumnCountProp,
         overscan: overscanProp = DEFAULT_OVERSCAN,
