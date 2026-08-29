@@ -806,7 +806,10 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         }),
         [columnCount, columnWidth, containerWidth, horizontalGap, maxColumnCount, verticalGap],
     );
-    const currentOptions = parsePositionerOptions(latestOptions);
+    const currentOptions = React.useMemo(
+        () => parsePositionerOptions(latestOptions),
+        [latestOptions],
+    );
     const rowGap = currentOptions.rowGap;
 
     const resetKeyRef = useRefWithInit(() => ({ value: 0 }));
