@@ -658,7 +658,12 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const pendingRef = useRefWithInit(() => new Map<number, PendingMeasurement>());
 
     const { validChildren, keys } = React.useMemo(() => {
-        const filteredChildren = React.Children.toArray(children).filter(isMasonryChildElement);
+        const filteredChildren: React.ReactElement<MasonryItemSlotProps>[] = [];
+        React.Children.forEach(children, (child) => {
+            if (isMasonryChildElement(child)) {
+                filteredChildren.push(child);
+            }
+        });
         return {
             validChildren: filteredChildren,
             keys: filteredChildren.map((child) => child.key),
