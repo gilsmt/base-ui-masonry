@@ -594,7 +594,7 @@ export interface MasonryRootProps extends BaseUIComponentProps<"div", MasonryRoo
     /**
      * How far beyond the viewport, as a multiple of its height, items are rendered
      * and unmeasured items are batched. Use `Infinity` to disable windowing and render every item.
-     * @default 1.5
+     * @default 2
      */
     overscan?: number;
     /**
