@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as React from "react";
 import { renderToString } from "react-dom/server";
-import {
-    areItemSlotPropsEqual,
-    buildPositioner,
-    commitPendingMeasurements,
-} from "../src/masonry.tsx";
+import { areItemSlotPropsEqual, parseOptions, Positioner } from "../src/masonry.tsx";
 import { MasonryItem, MasonryRoot } from "../src/masonry.tsx";
 import {
     buildFilled,
@@ -60,7 +56,8 @@ function findInertPair(shiftPx: number): { rest: WindowRange; shifted: WindowRan
         if (!bandHasTop(start) && !bandHasTop(scrollTop + span)) {
             const rest = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
             const shifted = getWindowRange(scrollTop + shiftPx, VIEWPORT_HEIGHT, OVERSCAN);
-            if (filled.isWindowShiftInert(rest.start, rest.end, shifted.start, shifted.end)) return { rest, shifted };
+            if (filled.isWindowShiftInert(rest.start, rest.end, shifted.start, shifted.end))
+                return { rest, shifted };
         }
     }
     throw new Error(`no inert pair for ${shiftPx}px`);
@@ -116,7 +113,8 @@ function boundaryCrossingRange(
             }
         }
         if (!onlyTarget) continue;
-        if (filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end)) throw new Error("unexpected inert");
+        if (filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end))
+            throw new Error("unexpected inert");
         return { previous, next };
     }
     throw new Error(`no isolated ${boundary} crossing for col ${targetColumn}`);
@@ -142,7 +140,12 @@ function simulateMasonryRootScroll(pxPerSecond: number) {
     let prevSet = new Set(renderedIndices(prevRange));
     for (let scrollTop = 5_000; scrollTop < totalHeight - VIEWPORT_HEIGHT; scrollTop += step) {
         const nextRange = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
-        const isInert = filled.isWindowShiftInert(prevRange.start, prevRange.end, nextRange.start, nextRange.end);
+        const isInert = filled.isWindowShiftInert(
+            prevRange.start,
+            prevRange.end,
+            nextRange.start,
+            nextRange.end,
+        );
         if (isInert) inert++;
         else {
             nonInert++;
@@ -169,19 +172,40 @@ function makeItems(count: number) {
 
 describe("MasonryRoot · scroll hysteresis render counts", () => {
     test("inert 16px wheel tick skips MasonryRoot commit and 0 ItemSlots rerender", () => {
-        expect(filled.isWindowShiftInert(INERT_16.rest.start, INERT_16.rest.end, INERT_16.shifted.start, INERT_16.shifted.end)).toBe(true);
+        expect(
+            filled.isWindowShiftInert(
+                INERT_16.rest.start,
+                INERT_16.rest.end,
+                INERT_16.shifted.start,
+                INERT_16.shifted.end,
+            ),
+        ).toBe(true);
         const a = renderedIndices(INERT_16.rest);
         const b = renderedIndices(INERT_16.shifted);
         expect(a).toEqual(b); // no ItemSlot should rerender
     });
 
     test("inert 64px also skips commit", () => {
-        expect(filled.isWindowShiftInert(INERT_64.rest.start, INERT_64.rest.end, INERT_64.shifted.start, INERT_64.shifted.end)).toBe(true);
+        expect(
+            filled.isWindowShiftInert(
+                INERT_64.rest.start,
+                INERT_64.rest.end,
+                INERT_64.shifted.start,
+                INERT_64.shifted.end,
+            ),
+        ).toBe(true);
         expect(renderedIndices(INERT_64.rest)).toEqual(renderedIndices(INERT_64.shifted));
     });
 
     test("boundary crossing in col 0 forces MasonryRoot commit and exactly 1 ItemSlot change", () => {
-        expect(filled.isWindowShiftInert(CROSSING_COL0.previous.start, CROSSING_COL0.previous.end, CROSSING_COL0.next.start, CROSSING_COL0.next.end)).toBe(false);
+        expect(
+            filled.isWindowShiftInert(
+                CROSSING_COL0.previous.start,
+                CROSSING_COL0.previous.end,
+                CROSSING_COL0.next.start,
+                CROSSING_COL0.next.end,
+            ),
+        ).toBe(false);
         const prev = new Set(renderedIndices(CROSSING_COL0.previous));
         const next = new Set(renderedIndices(CROSSING_COL0.next));
         let changed = 0;
@@ -191,7 +215,14 @@ describe("MasonryRoot · scroll hysteresis render counts", () => {
     });
 
     test("boundary crossing in last column forces commit and exactly 1 ItemSlot change (full scan)", () => {
-        expect(filled.isWindowShiftInert(CROSSING_LAST.previous.start, CROSSING_LAST.previous.end, CROSSING_LAST.next.start, CROSSING_LAST.next.end)).toBe(false);
+        expect(
+            filled.isWindowShiftInert(
+                CROSSING_LAST.previous.start,
+                CROSSING_LAST.previous.end,
+                CROSSING_LAST.next.start,
+                CROSSING_LAST.next.end,
+            ),
+        ).toBe(false);
         const prev = new Set(renderedIndices(CROSSING_LAST.previous));
         const next = new Set(renderedIndices(CROSSING_LAST.next));
         let changed = 0;
@@ -228,7 +259,7 @@ describe("ItemSlot · memoization render counts", () => {
     test("areItemSlotPropsEqual: memo hits exactly when placement+identity equal", () => {
         const dummyChild = React.createElement("div", null, "x") as React.ReactElement<any>;
         const dummyRegister = (() => () => {}) as any;
-        const itemA = filled.get(0)!;
+        const itemA = (filled as any).get(0)!;
         const itemB = { ...itemA };
         const itemC = { ...itemA, top: itemA.top + 1 };
 
@@ -247,11 +278,21 @@ describe("ItemSlot · memoization render counts", () => {
 
         // Hit: same placement, different object identity → no rerender
         expect(
-            areItemSlotPropsEqual(base, { ...base, left: itemB.left, top: itemB.top, height: itemB.height }),
+            areItemSlotPropsEqual(base, {
+                ...base,
+                left: itemB.left,
+                top: itemB.top,
+                height: itemB.height,
+            }),
         ).toBe(true);
         // Misses: each is a distinct render cause
         expect(
-            areItemSlotPropsEqual(base, { ...base, left: itemC.left, top: itemC.top, height: itemC.height }),
+            areItemSlotPropsEqual(base, {
+                ...base,
+                left: itemC.left,
+                top: itemC.top,
+                height: itemC.height,
+            }),
         ).toBe(false);
         expect(
             areItemSlotPropsEqual(base, {
@@ -262,7 +303,9 @@ describe("ItemSlot · memoization render counts", () => {
         expect(areItemSlotPropsEqual(base, { ...base, width: 199 })).toBe(false);
         expect(areItemSlotPropsEqual(base, { ...base, inert: true })).toBe(false);
         expect(areItemSlotPropsEqual(base, { ...base, resetKey: 1 })).toBe(false);
-        expect(areItemSlotPropsEqual({ ...base, left: null, top: null, height: null }, base)).toBe(false);
+        expect(areItemSlotPropsEqual({ ...base, left: null, top: null, height: null }, base)).toBe(
+            false,
+        );
         expect(
             areItemSlotPropsEqual(
                 { ...base, left: null, top: null, height: null },
@@ -274,7 +317,7 @@ describe("ItemSlot · memoization render counts", () => {
     test("areItemSlotPropsEqual: summary hits/misses is deterministic", () => {
         const dummyChild = React.createElement("div", null, "x") as React.ReactElement<any>;
         const dummyRegister = (() => () => {}) as any;
-        const itemA = filled.get(0)!;
+        const itemA = (filled as any).get(0)!;
         const base: any = {
             child: dummyChild,
             width: 200,
@@ -343,9 +386,9 @@ describe("useMeasurements · skipUpdatePredicate (hook render counts)", () => {
     });
 });
 
-describe("commitPendingMeasurements · batch dedup render counts", () => {
+describe("Positioner.flushPending · batch dedup render counts", () => {
     test("duplicate index in same batch: last write wins, update reflows once per column", () => {
-        const p = buildPositioner({ containerWidth: 1600 });
+        const p = new Positioner(parseOptions({ containerWidth: 1600 }));
         for (let i = 0; i < 100; i++) p.set(300);
         const before = p.getHeight(5)!;
         expect(before).toBe(300);
@@ -358,8 +401,8 @@ describe("commitPendingMeasurements · batch dedup render counts", () => {
         expect(p.getHeight(20)!).toBe(250);
     });
 
-    test("commitPendingMeasurements: unconnected or wrong-index nodes do not trigger renders", () => {
-        const p = buildPositioner({ containerWidth: 1600 });
+    test("flushPending: unconnected or wrong-index nodes do not trigger renders", () => {
+        const p = new Positioner(parseOptions({ containerWidth: 1600 }));
         for (let i = 0; i < 5; i++) p.set(100);
         const unconnected = { isConnected: false, getAttribute: () => "2" } as any;
         const wrongIndex = { isConnected: true, getAttribute: () => "999" } as any;
@@ -367,25 +410,25 @@ describe("commitPendingMeasurements · batch dedup render counts", () => {
             [2, { height: 200, node: unconnected }],
             [1, { height: 200, node: wrongIndex }],
         ]);
-        const didChange = commitPendingMeasurements(p as any, map as any);
+        const didChange = (p as any).flushPending(map as any);
         expect(didChange).toBe(false);
         expect(p.getHeight(2)!).toBe(100);
     });
 
-    test("commitPendingMeasurements: valid new index appends and valid update reflows", () => {
-        const p = buildPositioner({ containerWidth: 1600 });
+    test("flushPending: valid new index appends and valid update reflows", () => {
+        const p = new Positioner(parseOptions({ containerWidth: 1600 }));
         for (let i = 0; i < 3; i++) p.set(100);
         const mkNode = (idx: number) =>
             ({ isConnected: true, getAttribute: () => String(idx) }) as any;
         // Append at size (index === size) triggers set
         const appendMap = new Map<number, any>([[3, { height: 150, node: mkNode(3) }]]);
-        expect(commitPendingMeasurements(p as any, appendMap as any)).toBe(true);
+        expect((p as any).flushPending(appendMap as any)).toBe(true);
         expect(p.size()).toBe(4);
         expect(p.getHeight(3)!).toBe(150);
 
         // Update existing height at index 1 triggers update
         const updateMap = new Map<number, any>([[1, { height: 220, node: mkNode(1) }]]);
-        expect(commitPendingMeasurements(p as any, updateMap as any)).toBe(true);
+        expect((p as any).flushPending(updateMap as any)).toBe(true);
         expect(p.getHeight(1)!).toBe(220);
     });
 });
@@ -397,12 +440,20 @@ describe("MasonryRoot · SSR placeholder render counts", () => {
     });
 
     test("columnCount=3 renders 3 placeholders", () => {
-        const html = renderToString(<MasonryRoot columnCount={3} gap={0}>{makeItems(7)}</MasonryRoot>);
+        const html = renderToString(
+            <MasonryRoot columnCount={3} gap={0}>
+                {makeItems(7)}
+            </MasonryRoot>,
+        );
         expect(countPlaceholders(html)).toBe(3);
     });
 
     test("columnCount=8 with 100 items renders 8 placeholders (one per column)", () => {
-        const html = renderToString(<MasonryRoot columnCount={8} gap={0}>{makeItems(100)}</MasonryRoot>);
+        const html = renderToString(
+            <MasonryRoot columnCount={8} gap={0}>
+                {makeItems(100)}
+            </MasonryRoot>,
+        );
         expect(countPlaceholders(html)).toBe(8);
     });
 
@@ -422,7 +473,9 @@ describe("MasonryRoot · SSR placeholder render counts", () => {
         ];
         for (const [cols, items, expected] of cases) {
             const html = renderToString(
-                <MasonryRoot columnCount={cols} gap={0}>{makeItems(items)}</MasonryRoot>,
+                <MasonryRoot columnCount={cols} gap={0}>
+                    {makeItems(items)}
+                </MasonryRoot>,
             );
             expect(countPlaceholders(html)).toBe(expected);
         }

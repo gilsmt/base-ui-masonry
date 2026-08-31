@@ -26,12 +26,12 @@ let reflowCount = 0;
 {
     const firstByColumn = new Map<number, number>();
     for (const u of updates) {
-        const item = filled.get(u.index)!;
+        const item = (filled as any).get(u.index)!;
         firstByColumn.set(item.columnIndex, item.columnItemIndex);
     }
     const columnLengths = new Map<number, number>();
     for (let i = 0; i < filled.size(); i += 1) {
-        const it = filled.get(i)!;
+        const it = (filled as any).get(i)!;
         columnLengths.set(it.columnIndex, (columnLengths.get(it.columnIndex) ?? 0) + 1);
     }
     for (const [col, firstIdx] of firstByColumn) {

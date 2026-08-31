@@ -3,9 +3,7 @@
  *
  * The positioner under test is a verbatim copy of src/masonry.tsx's
  * "Positioner" section (plus getWindowRange/getScrollTop), kept in
- * bench/positioner.ts. Re-copied 2026-08-29 after scalar range/guard/getHeight
- * (#4) — findShortestColumnIndex, range(index,left,top,height), getHeight,
- * isWindowShiftInert(start,end,start,end) allocation-free.
+ * bench/positioner.ts. Re-copied 2026-08-31 after class conversion.
  *
  * WHY DETERMINISTIC: render counts (inert vs non-inert decisions, items
  * visited by range(), items rewritten by update()) are fully deterministic
@@ -18,8 +16,8 @@
  * All scenarios use N = 10,000 items (8 columns unless noted). Scenarios map
  * to real call sites:
  *
- *   - mount/reset/rebuild:    buildPositioner + set x N  (useIsoLayoutEffect)
- *   - container resize:       rebuildPositioner          (useIsoLayoutEffect)
+ *   - mount/reset/rebuild:    new Positioner + set x N  (useIsoLayoutEffect)
+ *   - container resize:       Positioner.rebuild          (useIsoLayoutEffect)
  *   - every scroll frame:     isWindowShiftInert         (skipUpdatePredicate,
  *                                                        runs BEFORE any render)
  *     + when non-inert:       range(low, high)           (render of MasonryRoot)
@@ -31,8 +29,11 @@
  *                            (requires mitata, quiet machine)
  */
 
+import { parseOptions } from "../src/masonry.tsx";
+
 import {
     OVERSCAN,
+    Positioner,
     VIEWPORT_HEIGHT,
     buildFilled,
     getColumnTops,
@@ -40,7 +41,6 @@ import {
     getWindowRange,
     makeHeights,
     mulberry32,
-    rebuildPositioner,
 } from "./positioner.ts";
 import type { WindowRange } from "./positioner.ts";
 
@@ -93,7 +93,6 @@ function findInertPair(shiftPx: number): { rest: WindowRange; shifted: WindowRan
 const INERT_16 = findInertPair(16);
 const INERT_64 = findInertPair(64);
 const REST_RANGE = INERT_16.rest;
-
 
 /**
  * Build previous/next range pairs whose ONLY rendered-set difference is a
@@ -185,10 +184,24 @@ function boundaryCrossingRange(
 const CROSSING_COL0 = boundaryCrossingRange(0, "start");
 const CROSSING_LAST = boundaryCrossingRange(filled.columnCount - 1, "end");
 
-if (filled.isWindowShiftInert(INERT_16.rest.start, INERT_16.rest.end, INERT_16.shifted.start, INERT_16.shifted.end) !== true) {
+if (
+    filled.isWindowShiftInert(
+        INERT_16.rest.start,
+        INERT_16.rest.end,
+        INERT_16.shifted.start,
+        INERT_16.shifted.end,
+    ) !== true
+) {
     throw new Error("16px shift fixture should be inert");
 }
-if (filled.isWindowShiftInert(INERT_64.rest.start, INERT_64.rest.end, INERT_64.shifted.start, INERT_64.shifted.end) !== true) {
+if (
+    filled.isWindowShiftInert(
+        INERT_64.rest.start,
+        INERT_64.rest.end,
+        INERT_64.shifted.start,
+        INERT_64.shifted.end,
+    ) !== true
+) {
     throw new Error("64px shift fixture should be inert");
 }
 
@@ -208,7 +221,7 @@ function reflowCountForUpdates(
 ): number {
     const firstByColumn = new Map<number, number>();
     for (const u of updates) {
-        const item = positioner.get(u.index)!;
+        const item = (positioner as any).get(u.index)!;
         const existing = firstByColumn.get(item.columnIndex);
         if (existing === undefined || item.columnItemIndex < existing) {
             firstByColumn.set(item.columnIndex, item.columnItemIndex);
@@ -216,7 +229,7 @@ function reflowCountForUpdates(
     }
     const lens = new Map<number, number>();
     for (let i = 0; i < positioner.size(); i += 1) {
-        const it = positioner.get(i)!;
+        const it = (positioner as any).get(i)!;
         lens.set(it.columnIndex, (lens.get(it.columnIndex) ?? 0) + 1);
     }
     let total = 0;
@@ -227,23 +240,77 @@ function reflowCountForUpdates(
 }
 
 console.log("masonry-positioner · deterministic render counts (N=10k, 8col)");
-console.log(`seed=42 · totalHeight=${totalHeight.toFixed(0)}px · viewport=${VIEWPORT_HEIGHT}px overscan=${OVERSCAN}`);
+console.log(
+    `seed=42 · totalHeight=${totalHeight.toFixed(0)}px · viewport=${VIEWPORT_HEIGHT}px overscan=${OVERSCAN}`,
+);
 
 // 1) Layout build
 console.log("\n[layout build]");
-console.log(`  set x ${N.toLocaleString()} (8 col)       -> ${N} items, ${filled.columnCount} cols`);
-console.log(`  rebuildPositioner 10k         -> ${rebuildPositioner(filled, { containerWidth: 1600 }).size()} items (deterministic)`);
+console.log(
+    `  set x ${N.toLocaleString()} (8 col)       -> ${N} items, ${filled.columnCount} cols`,
+);
+console.log(
+    `  Positioner.rebuild 10k         -> ${Positioner.rebuild(filled, parseOptions({ containerWidth: 1600 })).size()} items (deterministic)`,
+);
 
 // 2) Scroll frames: inertia guard — the deterministic signal is the boolean decision
 console.log("\n[guard · isWindowShiftInert — deterministic booleans]");
 const _nextPastEnd = getWindowRange(totalHeight + 5_000, VIEWPORT_HEIGHT, OVERSCAN);
 const guardCases: [string, boolean][] = [
-    ["identical range (fast path)", filled.isWindowShiftInert(REST_RANGE.start, REST_RANGE.end, REST_RANGE.start, REST_RANGE.end)],
-    ["inert shift +16px (wheel tick)", filled.isWindowShiftInert(INERT_16.rest.start, INERT_16.rest.end, INERT_16.shifted.start, INERT_16.shifted.end)],
-    ["inert shift +64px", filled.isWindowShiftInert(INERT_64.rest.start, INERT_64.rest.end, INERT_64.shifted.start, INERT_64.shifted.end)],
-    ["non-inert: crossing in col 0 (early exit)", filled.isWindowShiftInert(CROSSING_COL0.previous.start, CROSSING_COL0.previous.end, CROSSING_COL0.next.start, CROSSING_COL0.next.end)],
-    ["non-inert: crossing in last col (full scan)", filled.isWindowShiftInert(CROSSING_LAST.previous.start, CROSSING_LAST.previous.end, CROSSING_LAST.next.start, CROSSING_LAST.next.end)],
-    ["past end of list (shortestColumn bail-out)", filled.isWindowShiftInert(REST_RANGE.start, REST_RANGE.end, _nextPastEnd.start, _nextPastEnd.end)],
+    [
+        "identical range (fast path)",
+        filled.isWindowShiftInert(
+            REST_RANGE.start,
+            REST_RANGE.end,
+            REST_RANGE.start,
+            REST_RANGE.end,
+        ),
+    ],
+    [
+        "inert shift +16px (wheel tick)",
+        filled.isWindowShiftInert(
+            INERT_16.rest.start,
+            INERT_16.rest.end,
+            INERT_16.shifted.start,
+            INERT_16.shifted.end,
+        ),
+    ],
+    [
+        "inert shift +64px",
+        filled.isWindowShiftInert(
+            INERT_64.rest.start,
+            INERT_64.rest.end,
+            INERT_64.shifted.start,
+            INERT_64.shifted.end,
+        ),
+    ],
+    [
+        "non-inert: crossing in col 0 (early exit)",
+        filled.isWindowShiftInert(
+            CROSSING_COL0.previous.start,
+            CROSSING_COL0.previous.end,
+            CROSSING_COL0.next.start,
+            CROSSING_COL0.next.end,
+        ),
+    ],
+    [
+        "non-inert: crossing in last col (full scan)",
+        filled.isWindowShiftInert(
+            CROSSING_LAST.previous.start,
+            CROSSING_LAST.previous.end,
+            CROSSING_LAST.next.start,
+            CROSSING_LAST.next.end,
+        ),
+    ],
+    [
+        "past end of list (shortestColumn bail-out)",
+        filled.isWindowShiftInert(
+            REST_RANGE.start,
+            REST_RANGE.end,
+            _nextPastEnd.start,
+            _nextPastEnd.end,
+        ),
+    ],
 ];
 for (const [name, v] of guardCases) {
     console.log(`  ${name.padEnd(44)} -> ${v}`);
@@ -266,7 +333,9 @@ const worstCaseUpdates = Array.from({ length: filledWorst.columnCount }, (_, ind
     height: 350,
 }));
 const worstSpan = reflowCountForUpdates(filledWorst, worstCaseUpdates);
-console.log(`  worst case: top-of-column change (${worstCaseUpdates.length} updates) -> ${worstSpan} items rewritten`);
+console.log(
+    `  worst case: top-of-column change (${worstCaseUpdates.length} updates) -> ${worstSpan} items rewritten`,
+);
 
 const filledBatch = buildFilled(HEIGHTS);
 const batchUpdates = Array.from({ length: 24 }, () => ({
@@ -282,4 +351,6 @@ console.log(`  typical rAF batch: 24 scattered updates      -> ${batchSpan} item
 // immutable snapshots materialized on read instead of shared objects.
 console.log(`  update() item-object spreads across span     -> 0 allocs (scalar tail rewrite)`);
 
-console.log("\nnote: timing omitted by design — compare render counts in CI; run mitata locally on a quiet machine for ms");
+console.log(
+    "\nnote: timing omitted by design — compare render counts in CI; run mitata locally on a quiet machine for ms",
+);

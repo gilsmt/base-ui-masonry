@@ -11,10 +11,7 @@
  */
 
 import * as React from "react";
-import {
-    areItemSlotPropsEqual,
-    buildPositioner,
-} from "../src/masonry.tsx";
+import { areItemSlotPropsEqual, parseOptions, Positioner } from "../src/masonry.tsx";
 import {
     buildFilled as buildFilledCopy,
     getColumnTops,
@@ -59,7 +56,8 @@ function findInertPair(shiftPx: number): { rest: WindowRange; shifted: WindowRan
         if (!bandHasTop(start) && !bandHasTop(scrollTop + span)) {
             const rest = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
             const shifted = getWindowRange(scrollTop + shiftPx, VIEWPORT_HEIGHT, OVERSCAN);
-            if (filled.isWindowShiftInert(rest.start, rest.end, shifted.start, shifted.end)) return { rest, shifted };
+            if (filled.isWindowShiftInert(rest.start, rest.end, shifted.start, shifted.end))
+                return { rest, shifted };
         }
     }
     throw new Error(`no inert pair for ${shiftPx}px`);
@@ -115,7 +113,8 @@ function boundaryCrossingRange(
             }
         }
         if (!onlyTarget) continue;
-        if (filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end)) throw new Error("unexpected inert");
+        if (filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end))
+            throw new Error("unexpected inert");
         return { previous, next };
     }
     throw new Error(`no isolated ${boundary} crossing for col ${targetColumn}`);
@@ -153,7 +152,12 @@ function simulateScrollRenderCounts(pxPerSecond: number) {
 
     for (let scrollTop = 5_000; scrollTop < totalHeight - VIEWPORT_HEIGHT; scrollTop += step) {
         const nextRange = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
-        const isInert = filled.isWindowShiftInert(prevRange.start, prevRange.end, nextRange.start, nextRange.end);
+        const isInert = filled.isWindowShiftInert(
+            prevRange.start,
+            prevRange.end,
+            nextRange.start,
+            nextRange.end,
+        );
         if (isInert) inert++;
         else {
             nonInert++;
@@ -228,8 +232,18 @@ function probeItemSlotMemo() {
     };
 
     const cases: [string, any, any, boolean][] = [
-        ["identical placement (memo hit)", baseProps, { ...baseProps, left: itemB.left, top: itemB.top, height: itemB.height }, true],
-        ["different placement (miss)", baseProps, { ...baseProps, left: itemC.left, top: itemC.top, height: itemC.height }, false],
+        [
+            "identical placement (memo hit)",
+            baseProps,
+            { ...baseProps, left: itemB.left, top: itemB.top, height: itemB.height },
+            true,
+        ],
+        [
+            "different placement (miss)",
+            baseProps,
+            { ...baseProps, left: itemC.left, top: itemC.top, height: itemC.height },
+            false,
+        ],
         [
             "different child (miss)",
             baseProps,
@@ -239,8 +253,18 @@ function probeItemSlotMemo() {
         ["different width (miss)", baseProps, { ...baseProps, width: 199 }, false],
         ["inert flip (miss)", baseProps, { ...baseProps, inert: true }, false],
         ["resetKey bump (miss)", baseProps, { ...baseProps, resetKey: 1 }, false],
-        ["null vs valued (miss)", { ...baseProps, left: null, top: null, height: null }, baseProps, false],
-        ["null vs null (hit)", { ...baseProps, left: null, top: null, height: null }, { ...baseProps, left: null, top: null, height: null }, true],
+        [
+            "null vs valued (miss)",
+            { ...baseProps, left: null, top: null, height: null },
+            baseProps,
+            false,
+        ],
+        [
+            "null vs null (hit)",
+            { ...baseProps, left: null, top: null, height: null },
+            { ...baseProps, left: null, top: null, height: null },
+            true,
+        ],
     ];
 
     let hits = 0,
@@ -254,8 +278,10 @@ function probeItemSlotMemo() {
             );
         // Validate scalar left/top/height equality
         if (prev.left !== undefined && next.left !== undefined) {
-            const equal = prev.left === next.left && prev.top === next.top && prev.height === next.height;
-            const expectEqual = prev.left === next.left && prev.top === next.top && prev.height === next.height;
+            const equal =
+                prev.left === next.left && prev.top === next.top && prev.height === next.height;
+            const expectEqual =
+                prev.left === next.left && prev.top === next.top && prev.height === next.height;
             if (equal !== expectEqual) throw new Error(`scalar equality failed: ${name}`);
         }
         if (hit) hits++;
@@ -332,7 +358,7 @@ console.log(
 // 5) commitPendingMeasurements — batch dedup (deterministic, no timing)
 console.log("\n[commitPendingMeasurements · batch dedup — positioner work]");
 {
-    const p = buildPositioner({ containerWidth: 1600 });
+    const p = new Positioner(parseOptions({ containerWidth: 1600 }));
     for (let i = 0; i < 100; i++) p.set(300);
     // Two measurements for same index in one batch → only last height matters
     // We can't call commitPendingMeasurements without real HTMLElements, but we

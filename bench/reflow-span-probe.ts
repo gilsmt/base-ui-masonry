@@ -14,7 +14,7 @@ function reflowSpan(indices: number[]): number {
     const firstByColumn = new Map<number, number>();
     let totalRewritten = 0;
     for (const index of indices) {
-        const item = filled.get(index)!;
+        const item = (filled as any).get(index)!;
         const existing = firstByColumn.get(item.columnIndex);
         if (existing === undefined || item.columnItemIndex < existing) {
             firstByColumn.set(item.columnIndex, item.columnItemIndex);
@@ -24,7 +24,7 @@ function reflowSpan(indices: number[]): number {
     // We infer column lengths from the filled positioner without timing the update.
     const columnLengths = new Map<number, number>();
     for (let i = 0; i < filled.size(); i += 1) {
-        const it = filled.get(i)!;
+        const it = (filled as any).get(i)!;
         columnLengths.set(it.columnIndex, (columnLengths.get(it.columnIndex) ?? 0) + 1);
     }
     for (const [col, firstIdx] of firstByColumn) {
@@ -39,7 +39,7 @@ function measure(name: string, indices: number[], height: number) {
     // columns touched = size of firstByColumn; recompute cheaply via a fresh positioner
     // to avoid coupling reflowSpan internals to the log format
     const probe = buildFilled(HEIGHTS);
-    const cols = new Set(indices.map((i) => probe.get(i)!.columnIndex)).size;
+    const cols = new Set(indices.map((i) => (probe as any).get(i)!.columnIndex)).size;
     console.log(
         `${name}: ${String(indices.length).padStart(2)} updates · ${String(cols).padStart(1)} cols · ${String(span).padStart(5)} items rewritten (deterministic)`,
     );
