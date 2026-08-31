@@ -401,18 +401,26 @@ describe("Positioner.flushPending · batch dedup render counts", () => {
         expect(p.getHeight(20)!).toBe(250);
     });
 
-    test("flushPending: unconnected or wrong-index nodes do not trigger renders", () => {
+    test("flushPending: unconnected nodes are dropped without triggering renders", () => {
         const p = new Positioner(parseOptions({ containerWidth: 1600 }));
         for (let i = 0; i < 5; i++) p.set(100);
         const unconnected = { isConnected: false, getAttribute: () => "2" } as any;
-        const wrongIndex = { isConnected: true, getAttribute: () => "999" } as any;
-        const map = new Map<number, any>([
-            [2, { height: 200, node: unconnected }],
-            [1, { height: 200, node: wrongIndex }],
-        ]);
+        const map = new Map<any, number>([[unconnected, 200]]);
         const didChange = (p as any).flushPending(map as any);
         expect(didChange).toBe(false);
         expect(p.getHeight(2)!).toBe(100);
+        expect(map.size).toBe(0);
+    });
+
+    test("flushPending: an append ahead of the frontier stays pending for retry", () => {
+        const p = new Positioner(parseOptions({ containerWidth: 1600 }));
+        for (let i = 0; i < 5; i++) p.set(100);
+        const ahead = { isConnected: true, getAttribute: () => "9" } as any;
+        const map = new Map<any, number>([[ahead, 200]]);
+        expect((p as any).flushPending(map as any)).toBe(false);
+        expect(p.size()).toBe(5);
+        // The entry is retained: its turn has not come yet.
+        expect(map.size).toBe(1);
     });
 
     test("flushPending: valid new index appends and valid update reflows", () => {
@@ -420,14 +428,14 @@ describe("Positioner.flushPending · batch dedup render counts", () => {
         for (let i = 0; i < 3; i++) p.set(100);
         const mkNode = (idx: number) =>
             ({ isConnected: true, getAttribute: () => String(idx) }) as any;
-        // Append at size (index === size) triggers set
-        const appendMap = new Map<number, any>([[3, { height: 150, node: mkNode(3) }]]);
+        // Append at the frontier (node's index === size) triggers set
+        const appendMap = new Map<any, number>([[mkNode(3), 150]]);
         expect((p as any).flushPending(appendMap as any)).toBe(true);
         expect(p.size()).toBe(4);
         expect(p.getHeight(3)!).toBe(150);
 
         // Update existing height at index 1 triggers update
-        const updateMap = new Map<number, any>([[1, { height: 220, node: mkNode(1) }]]);
+        const updateMap = new Map<any, number>([[mkNode(1), 220]]);
         expect((p as any).flushPending(updateMap as any)).toBe(true);
         expect(p.getHeight(1)!).toBe(220);
     });

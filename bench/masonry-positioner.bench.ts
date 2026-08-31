@@ -1,9 +1,15 @@
 /**
  * Deterministic render-count probes for the layout engine in src/masonry.tsx.
  *
- * The positioner under test is a verbatim copy of src/masonry.tsx's
- * "Positioner" section (plus getWindowRange/getScrollTop), kept in
- * bench/positioner.ts. Re-copied 2026-08-31 after class conversion.
+ * The positioner under test is the LIVE class re-exported from
+ * src/masonry.tsx via bench/positioner.ts (plus a test-only `get`
+ * introspection helper), so every change to the Positioner class is
+ * exercised directly by these benches and tests.
+ *
+ * DRIFT WARNING: getWindowRange/getScrollTop in bench/positioner.ts
+ * duplicate the module-private parseRange/getScrollTop in src (the
+ * 0.4/0.6 forward-overscan split). If those constants ever change in
+ * src, update the bench copies — they are NOT imported.
  *
  * WHY DETERMINISTIC: render counts (inert vs non-inert decisions, items
  * visited by range(), items rewritten by update()) are fully deterministic

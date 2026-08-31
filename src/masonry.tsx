@@ -151,9 +151,9 @@ export function parseOptions({
     verticalGap?: number | undefined;
 }): PositionerOptions {
     const width = parsePositive(containerWidth, 0);
-    const rawWidth = parsePositive(preferredWidth, DEFAULT_COLUMN_WIDTH);
     const columnGap = parseMin(horizontalGap, 0, 0);
     const rowGap = parseMin(verticalGap, 0, columnGap);
+    const rawWidth = parsePositive(preferredWidth, DEFAULT_COLUMN_WIDTH);
     const itemWidth = Math.max(MINIMUM_COLUMN_WIDTH, rawWidth);
     const maxColumns = parsePositive(maxColumnCount, Number.POSITIVE_INFINITY);
     const requested = parsePositive(
@@ -168,11 +168,6 @@ export function parseOptions({
 interface PositionerUpdate {
     height: number;
     index: number;
-}
-
-interface PendingMeasurement {
-    height: number;
-    node: Element;
 }
 
 export class Positioner {
@@ -371,35 +366,42 @@ export class Positioner {
         return next;
     }
 
-    flushPending(pending: Map<number, PendingMeasurement>): boolean {
+    flushPending(pending: Map<Element, number>): boolean {
         if (pending.size === 0) {
             return false;
         }
 
+        const entries: { height: number; index: number; node: Element }[] = [];
+        for (const [node, height] of pending) {
+            pending.delete(node);
+            if (!node.isConnected) {
+                continue;
+            }
+            const index = getNodeDataIndex(node);
+            if (index === null) {
+                continue;
+            }
+            entries.push({ height, index, node });
+        }
+        entries.sort((a, b) => a.index - b.index);
+
         const updates: PositionerUpdate[] = [];
         let appended = false;
 
-        const indices = Array.from(pending.keys()).sort((a, b) => a - b);
-        for (const index of indices) {
-            const measurement = pending.get(index);
-            if (!measurement?.node.isConnected || getNodeDataIndex(measurement.node) !== index) {
-                pending.delete(index);
-                continue;
-            }
+        for (const { height, index, node } of entries) {
             const currentHeight = this.getHeight(index);
             if (currentHeight === undefined) {
                 if (index !== this.size()) {
+                    pending.set(node, height);
                     continue;
                 }
-                this.set(measurement.height);
-                pending.delete(index);
+                this.set(height);
                 appended = true;
                 continue;
             }
-            if (currentHeight !== measurement.height) {
-                updates.push({ height: measurement.height, index });
+            if (currentHeight !== height) {
+                updates.push({ height, index });
             }
-            pending.delete(index);
         }
 
         if (updates.length > 0) {
@@ -412,9 +414,9 @@ export class Positioner {
 }
 
 function useItemResizeObserver(
-    callbackFnProp: (index: number, node: Element, height: number) => void,
+    callbackProp: (node: Element, height: number) => void,
 ): ResizeObserver | null {
-    const callbackFn = useStableCallback(callbackFnProp);
+    const callbackFn = useStableCallback(callbackProp);
     const resizeObserver = useRefWithInit(() => {
         if (typeof ResizeObserver !== "function") {
             return null;
@@ -422,11 +424,7 @@ function useItemResizeObserver(
 
         return new ResizeObserver((entries) => {
             for (const entry of entries) {
-                const itemIndex = getNodeDataIndex(entry.target);
-                if (itemIndex === null) {
-                    continue;
-                }
-                callbackFn(itemIndex, entry.target, entry.borderBoxSize[0].blockSize);
+                callbackFn(entry.target, entry.borderBoxSize[0].blockSize);
             }
         });
     }).current;
@@ -468,7 +466,7 @@ export interface ItemSlotProps {
     left: number | null;
     top: number | null;
     height: number | null;
-    register: (index: number, node: HTMLElement) => (() => void) | undefined;
+    register: (node: HTMLElement) => (() => void) | undefined;
     resetKey: number;
 }
 
@@ -511,9 +509,9 @@ export const ItemSlot = React.memo(function ItemSlot({
             if (node === null) {
                 return undefined;
             }
-            return register(index, node);
+            return register(node);
         },
-        [index, register, resetKey],
+        [register, resetKey],
     );
     const mergedRefs = useMergedRefs(registerNode, child.props.ref);
 
@@ -655,7 +653,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const resetKeyRef = React.useRef(0);
     const positionerRef = useRefWithInit(() => new Positioner(currentOptions));
     const keysRef = React.useRef<Keys | null>(null);
-    const pendingRef = useRefWithInit(() => new Map<number, PendingMeasurement>());
+    const pendingRef = useRefWithInit(() => new Map<Element, number>());
 
     const { validChildren, keys } = React.useMemo(() => {
         const filteredChildren: React.ReactElement<MasonryItemSlotProps>[] = [];
@@ -671,23 +669,6 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     }, [children]);
     const itemCount = validChildren.length;
 
-    const isScrollUpdateRedundant = useStableCallback(
-        (previous: Measurements, next: Measurements) => {
-            const previousRange = parseRange(
-                getScrollTop(previous),
-                previous.windowHeight,
-                overscan,
-            );
-            const nextRange = parseRange(getScrollTop(next), next.windowHeight, overscan);
-            return positionerRef.current.isWindowShiftInert(
-                previousRange.start,
-                previousRange.end,
-                nextRange.start,
-                nextRange.end,
-            );
-        },
-    );
-
     const commit = useStableCallback(() => {
         const layoutMutated = positionerRef.current.flushPending(pendingRef.current);
 
@@ -695,6 +676,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         if (!container) {
             return;
         }
+
         const previous = measurementsRef.current;
         const win = ownerWindow(container);
         const scrollY = containerProp?.scrollTop ?? win.scrollY;
@@ -718,24 +700,27 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
               }
             : { ...previous, scrollY };
 
-        const isLayoutSame =
-            previous.containerOffset === next.containerOffset &&
-            previous.containerWidth === next.containerWidth &&
-            previous.windowHeight === next.windowHeight;
-
-        const shouldCommit = !(
-            isLayoutSame &&
-            (previous.scrollY === next.scrollY || isScrollUpdateRedundant(previous, next))
+        const hasLayoutChanged =
+            previous.containerOffset !== next.containerOffset ||
+            previous.containerWidth !== next.containerWidth ||
+            previous.windowHeight !== next.windowHeight;
+        const previousRange = parseRange(getScrollTop(previous), previous.windowHeight, overscan);
+        const nextRange = parseRange(getScrollTop(next), next.windowHeight, overscan);
+        const isWindowShiftInert = positionerRef.current.isWindowShiftInert(
+            previousRange.start,
+            previousRange.end,
+            nextRange.start,
+            nextRange.end,
         );
+        const hasScrollChanged = previous.scrollY !== next.scrollY;
+        const shouldCommit = hasLayoutChanged || (hasScrollChanged && !isWindowShiftInert);
 
-        if (!shouldCommit && !layoutMutated) {
-            return;
+        if (shouldCommit || layoutMutated) {
+            flushSync(() => {
+                if (shouldCommit) setMeasurements(next);
+                if (layoutMutated) rerender();
+            });
         }
-
-        flushSync(() => {
-            if (shouldCommit) setMeasurements(next);
-            if (layoutMutated) rerender();
-        });
     });
 
     const requestDirtyCommit = useStableCallback(() => {
@@ -747,22 +732,16 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
         animationFrame.request(commit);
     });
 
-    const queueMeasurementCommit = useStableCallback(
-        (index: number, node: Element, height: number) => {
-            pendingRef.current.set(index, { height, node });
-            requestCommit();
-        },
-    );
+    const resizeObserver = useItemResizeObserver((node, height) => {
+        pendingRef.current.set(node, height);
+        requestCommit();
+    });
 
-    const resizeObserver = useItemResizeObserver(queueMeasurementCommit);
-
-    const registerItemNode = useStableCallback((index: number, node: HTMLElement) => {
+    const registerItemNode = useStableCallback((node: HTMLElement) => {
         resizeObserver?.observe(node);
         return () => {
             resizeObserver?.unobserve(node);
-            if (pendingRef.current.get(index)?.node === node) {
-                pendingRef.current.delete(index);
-            }
+            pendingRef.current.delete(node);
         };
     });
 
