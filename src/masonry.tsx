@@ -18,7 +18,7 @@ import { flushSync } from "react-dom";
 
 const DEFAULT_COLUMN_WIDTH = 200;
 const DEFAULT_ITEM_HEIGHT = 300;
-const DEFAULT_OVERSCAN = 1.5;
+const DEFAULT_OVERSCAN = 2;
 const DEFAULT_FORWARD_OVERSCAN = 0.6;
 const MINIMUM_COLUMN_WIDTH = 1;
 
@@ -72,11 +72,12 @@ function parseRange(scrollTop: number, windowHeight: number, overscan: number) {
     if (!Number.isFinite(overscan)) {
         return { start: 0, end: Number.POSITIVE_INFINITY };
     }
-    const pad = windowHeight > 0 ? windowHeight * overscan : 0;
+    const height = Math.max(0, windowHeight);
+    const pad = height * overscan;
     const behind = 1 - DEFAULT_FORWARD_OVERSCAN;
     return {
         start: Math.max(0, scrollTop - pad * behind),
-        end: scrollTop + windowHeight + pad * DEFAULT_FORWARD_OVERSCAN,
+        end: scrollTop + height + pad * DEFAULT_FORWARD_OVERSCAN,
     };
 }
 
@@ -115,17 +116,20 @@ function findFirstOverlappingRowIndex(
     low: number,
 ) {
     const rowIndex = findFirstIndex(tops, low, true);
-    if (rowIndex > 0) {
-        const previousItemIndex = items[rowIndex - 1];
-        if (tops[rowIndex - 1] + heights[previousItemIndex] >= low) {
-            return rowIndex - 1;
-        }
+    if (rowIndex === 0) {
+        return rowIndex;
     }
-    return rowIndex;
+    const previousItemIndex = items[rowIndex - 1];
+    const previousRowBottom = tops[rowIndex - 1] + heights[previousItemIndex];
+    return previousRowBottom >= low ? rowIndex - 1 : rowIndex;
 }
 
 function countFittingColumns(containerWidth: number, columnWidth: number, columnGap: number) {
-    return Math.floor((containerWidth + columnGap) / (columnWidth + columnGap));
+    if (columnWidth <= 0) {
+        return 0; // guard div by zero
+    }
+    const totalColumnWidth = columnWidth + columnGap;
+    return Math.floor((containerWidth + columnGap) / totalColumnWidth);
 }
 
 interface PositionerOptions {
@@ -670,54 +674,112 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     const itemCount = validChildren.length;
 
     const commit = useStableCallback(() => {
-        const layoutMutated = positionerRef.current.flushPending(pendingRef.current);
-
         const container = containerRef.current;
         if (!container) {
             return;
         }
 
+        const positioner = positionerRef.current;
+        const pending = pendingRef.current;
         const previous = measurementsRef.current;
-        const win = ownerWindow(container);
-        const scrollY = containerProp?.scrollTop ?? win.scrollY;
-
+        const scrollY = containerProp ? containerProp.scrollTop : ownerWindow(container).scrollY;
         const wasDirty = isDirtyRef.current;
-        isDirtyRef.current = false;
+        const hasPending = pending.size > 0;
 
-        const next: Measurements = wasDirty
-            ? {
-                  containerOffset:
-                      container.getBoundingClientRect().top -
-                      (containerProp
-                          ? containerProp.getBoundingClientRect().top + containerProp.clientTop
-                          : 0) +
-                      scrollY,
-                  containerWidth: container.clientWidth,
-                  scrollY,
-                  windowHeight:
-                      containerProp?.clientHeight ??
-                      ownerDocument(container).documentElement.clientHeight,
-              }
-            : { ...previous, scrollY };
+        if (!wasDirty && scrollY === previous.scrollY && !hasPending) {
+            return;
+        }
 
-        const hasLayoutChanged =
-            previous.containerOffset !== next.containerOffset ||
-            previous.containerWidth !== next.containerWidth ||
-            previous.windowHeight !== next.windowHeight;
-        const previousRange = parseRange(getScrollTop(previous), previous.windowHeight, overscan);
-        const nextRange = parseRange(getScrollTop(next), next.windowHeight, overscan);
-        const isWindowShiftInert = positionerRef.current.isWindowShiftInert(
-            previousRange.start,
-            previousRange.end,
-            nextRange.start,
-            nextRange.end,
-        );
-        const hasScrollChanged = previous.scrollY !== next.scrollY;
-        const shouldCommit = hasLayoutChanged || (hasScrollChanged && !isWindowShiftInert);
+        const layoutMutated = hasPending ? positioner.flushPending(pending) : false;
+
+        if (wasDirty) {
+            isDirtyRef.current = false;
+        }
+
+        let hasLayoutChanged = false;
+        const hasScrollChanged = scrollY !== previous.scrollY;
+        let next: Measurements | null = null;
+
+        if (wasDirty) {
+            const containerTop = container.getBoundingClientRect().top;
+            const baseTop = containerProp
+                ? containerProp.getBoundingClientRect().top + containerProp.clientTop
+                : 0;
+            const nextContainerOffset = containerTop - baseTop + scrollY;
+            const nextContainerWidth = container.clientWidth;
+            const nextWindowHeight = containerProp
+                ? containerProp.clientHeight
+                : ownerDocument(container).documentElement.clientHeight;
+
+            hasLayoutChanged =
+                nextContainerOffset !== previous.containerOffset ||
+                nextContainerWidth !== previous.containerWidth ||
+                nextWindowHeight !== previous.windowHeight;
+
+            if (hasLayoutChanged || hasScrollChanged) {
+                next = {
+                    containerOffset: nextContainerOffset,
+                    containerWidth: nextContainerWidth,
+                    scrollY,
+                    windowHeight: nextWindowHeight,
+                };
+            } else if (!layoutMutated) {
+                return;
+            }
+            // else: no measurement change but layout mutated -> fall through
+            // to unified flush below (rerender only)
+        } else if (!hasScrollChanged) {
+            if (!layoutMutated) {
+                return;
+            }
+            // else: pending mutated without scroll -> fall through to unified flush
+        }
+
+        // If we fell through with wasDirty && !hasLayoutChanged && !hasScrollChanged
+        // but layoutMutated, shouldCommit remains false and we will flush rerender only.
+        // Otherwise compute whether scroll requires a measurement commit.
+
+        let shouldCommit = false;
+        if (hasLayoutChanged) {
+            shouldCommit = true;
+        } else if (hasScrollChanged) {
+            const prevTop = getScrollTop(previous);
+            const winH = wasDirty
+                ? (next?.windowHeight ?? previous.windowHeight)
+                : previous.windowHeight;
+            const nextContainerOffset = wasDirty
+                ? (next?.containerOffset ?? previous.containerOffset)
+                : previous.containerOffset;
+            const nextTop = Math.max(0, scrollY - nextContainerOffset);
+
+            const prevRange = parseRange(prevTop, winH, overscan);
+            const nextRange = parseRange(nextTop, winH, overscan);
+
+            shouldCommit = !positioner.isWindowShiftInert(
+                prevRange.start,
+                prevRange.end,
+                nextRange.start,
+                nextRange.end,
+            );
+
+            if (shouldCommit && !wasDirty) {
+                next = {
+                    containerOffset: previous.containerOffset,
+                    containerWidth: previous.containerWidth,
+                    windowHeight: winH,
+                    scrollY,
+                };
+            } else if (!shouldCommit && wasDirty && next && !hasLayoutChanged) {
+                // Inert scroll while dirty and layout unchanged: discard the
+                // scrollY-only measurement; we keep previous scrollY until a
+                // non-inert shift occurs (hysteresis coalescing).
+                next = null;
+            }
+        }
 
         if (shouldCommit || layoutMutated) {
             flushSync(() => {
-                if (shouldCommit) setMeasurements(next);
+                if (shouldCommit && next) setMeasurements(next);
                 if (layoutMutated) rerender();
             });
         }
@@ -746,8 +808,8 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     });
 
     useIsoLayoutEffect(() => {
-        const containerElement = containerRef.current;
-        if (!containerElement) {
+        const container = containerRef.current;
+        if (!container) {
             return;
         }
 
@@ -755,21 +817,22 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
 
         const resizeObserver =
             typeof ResizeObserver === "function" ? new ResizeObserver(requestDirtyCommit) : null;
+
         if (resizeObserver) {
-            resizeObserver.observe(containerElement);
+            resizeObserver.observe(container);
+            resizeObserver.observe(ownerDocument(container).body);
             if (containerProp) {
                 resizeObserver.observe(containerProp);
             }
-            resizeObserver.observe(ownerDocument(containerElement).body);
         }
 
-        const win = ownerWindow(containerElement);
+        const win = ownerWindow(container);
         return mergeCleanups(
             addEventListener(containerProp ?? win, "scroll", requestCommit, { passive: true }),
             addEventListener(win, "resize", requestDirtyCommit),
             addEventListener(win, "orientationchange", requestDirtyCommit),
             win.visualViewport
-                ? addEventListener(win.visualViewport, "resize", requestDirtyCommit)
+                ? addEventListener(win.visualViewport, "resize", requestCommit)
                 : null,
             resizeObserver ? () => resizeObserver.disconnect() : null,
         );
@@ -808,7 +871,7 @@ export function MasonryRoot(componentProps: MasonryRootProps): React.ReactElemen
     }, [keys, itemCount, currentOptions, rerender, requestDirtyCommit]);
 
     const { start: rangeStart, end: rangeEnd } = parseRange(scrollTop, windowHeight, overscan);
-    const positioner = positionerRef.current; // intentionally read during render before commit
+    const positioner = positionerRef.current; // ref intentionally read during render before commit
     const unmeasuredStart = positioner.size();
     const minCol = positioner.shortestColumn();
 
