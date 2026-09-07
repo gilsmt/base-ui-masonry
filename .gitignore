@@ -1,8 +1,7 @@
-.DS_Store
-
 # dependencies
 node_modules
 bun.lock
+
 # output
 out
 dist
@@ -29,4 +28,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .eslintcache
 .cache
 *.tsbuildinfo
-.agents
+
+# misc
+.DS_Store
