@@ -78,7 +78,7 @@ export function parseRange(scrollTop: number, windowHeight: number, overscan: nu
     };
 }
 
-export function nextMeasurements(
+function nextMeasurements(
     positioner: Positioner,
     previous: Measurements,
     scrollY: number,
@@ -111,7 +111,7 @@ export function nextMeasurements(
 
 function findShortestColumnIndex(heights: number[]) {
     let bestIndex = 0;
-    let minHeight = heights[0] ?? Number.POSITIVE_INFINITY;
+    let [minHeight] = heights;
     for (let i = 1; i < heights.length; i += 1) {
         const height = heights[i];
         if (height < minHeight) {
@@ -195,15 +195,7 @@ function deriveLayout(
     let tallest = 0;
     for (let i = 0; i < heights.length; i += 1) {
         const height = heights[i];
-        // Columns hold only measured items (tops[i]). make sure to never push unknown-height items
-        if (height === undefined) {
-            continue;
-        }
-        const stored = cols[i];
-        const col =
-            stored === undefined || stored < 0 || stored >= columnCount
-                ? findShortestColumnIndex(columnHeights)
-                : stored;
+        const col = cols[i];
         const top = appendToColumn(columnHeights, col, height, rowGap);
         tops[i] = top;
         columnItems[col]?.push(i);
@@ -227,7 +219,7 @@ function findItemWindow(
     while (startLow < startHigh) {
         const mid = (startLow + startHigh) >>> 1;
         const item = items[mid];
-        if (item === undefined || tops[item] + heights[item] >= low) {
+        if (tops[item] + heights[item] >= low) {
             startHigh = mid;
         } else {
             startLow = mid + 1;
@@ -238,7 +230,7 @@ function findItemWindow(
     while (endLow < endHigh) {
         const mid = (endLow + endHigh) >>> 1;
         const item = items[mid];
-        if (item !== undefined && tops[item] <= high) {
+        if (tops[item] <= high) {
             endLow = mid + 1;
         } else {
             endHigh = mid;
@@ -296,7 +288,7 @@ export class Positioner {
         const { layout } = this;
         for (let col = 0; col < this.options.columnCount; col += 1) {
             const items = layout.columnItems[col];
-            if (!items || items.length === 0) {
+            if (items.length === 0) {
                 continue;
             }
             const { end, start } = findItemWindow(items, layout.tops, this.heights, low, high);
@@ -326,7 +318,7 @@ export class Positioner {
         const { layout } = this;
         for (let col = 0; col < this.options.columnCount; col += 1) {
             const items = layout.columnItems[col];
-            if (!items || items.length === 0) {
+            if (items.length === 0) {
                 continue;
             }
             const prev = findItemWindow(items, layout.tops, this.heights, prevLow, prevHigh);
@@ -343,7 +335,7 @@ export class Positioner {
         for (let i = 0; i < this.heights.length; i += 1) {
             const col = findShortestColumnIndex(columnHeights);
             this.cols[i] = col;
-            appendToColumn(columnHeights, col, this.heights[i] ?? 0, rowGap);
+            appendToColumn(columnHeights, col, this.heights[i], rowGap);
         }
     }
     setOptions(options: PositionerOptions): boolean {
@@ -509,7 +501,7 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
     let element: React.ReactElement<MasonryItemSlotProps> | null = null;
     if (typeof render === "function") {
         const rendered = item === null || item === undefined ? null : render(item, index);
-        if (rendered && React.isValidElement<MasonryItemSlotProps>(rendered)) {
+        if (React.isValidElement<MasonryItemSlotProps>(rendered)) {
             element = rendered;
         } else {
             warn(
