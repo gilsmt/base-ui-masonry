@@ -169,7 +169,7 @@ function appendToColumn(
     height: number,
     rowGap: number,
 ): number {
-    const top = (columnHeights[col] ?? -rowGap) + rowGap;
+    const top = columnHeights[col] + rowGap;
     columnHeights[col] = top + height;
     return top;
 }
@@ -195,7 +195,7 @@ function deriveLayout(
         const col = cols[i];
         const top = appendToColumn(columnHeights, col, height, rowGap);
         tops[i] = top;
-        columnItems[col]?.push(i);
+        columnItems[col].push(i);
         const bottom = top + height;
         if (bottom > tallest) {
             tallest = bottom;
@@ -240,7 +240,7 @@ export class Positioner {
     defaultItemHeight: number;
     private options: PositionerOptions;
     private heights: number[];
-    private cols: number[];
+    private cols: number[]; // cols[i] is always < options.columnCount
     private cachedLayout: MasonryLayout | null;
 
     constructor(options: PositionerOptions, defaultItemHeight = DEFAULT_ITEM_HEIGHT) {
@@ -336,10 +336,11 @@ export class Positioner {
         }
     }
     setOptions(options: PositionerOptions): boolean {
-        if (fastObjectShallowCompare(this.options, options)) {
+        const nextOptions = normalizeOptions(options);
+        if (fastObjectShallowCompare(this.options, nextOptions)) {
             return false;
         }
-        this.options = normalizeOptions(options);
+        this.options = nextOptions;
         this.reassignAll();
         this.cachedLayout = null;
         return true;
@@ -375,28 +376,23 @@ export class Positioner {
         for (let i = 0; i < nextKeys.length; i += 1) {
             const key = nextKeys[i];
             let height: number;
-            let col: number | undefined;
-            if (key === null && prevKeys[i] === null) {
-                // Keyless items keep positional identity: the item at this
-                // index is the same one, so keep its measurement and column.
-                height = this.heights[i] ?? this.defaultItemHeight;
-                const kept = this.cols[i];
-                if (kept !== undefined && kept >= 0 && kept < columnCount) {
-                    col = kept;
+            let kept: number | undefined;
+            if (key === null) {
+                if (prevKeys[i] === null) {
+                    // Keyless items keep positional identity: the item at this
+                    // index is the same one, so keep its measurement and column.
+                    height = this.heights[i] ?? this.defaultItemHeight;
+                    kept = this.cols[i];
+                } else {
+                    height = this.defaultItemHeight;
                 }
             } else {
-                height =
-                    key === null
-                        ? this.defaultItemHeight
-                        : (heightByKey.get(key) ?? this.defaultItemHeight);
+                height = heightByKey.get(key) ?? this.defaultItemHeight;
                 if (!removed) {
-                    const kept = key === null ? undefined : colByKey.get(key);
-                    if (kept !== undefined && kept >= 0 && kept < columnCount) {
-                        col = kept;
-                    }
+                    kept = colByKey.get(key);
                 }
             }
-            col ??= findShortestColumnIndex(columnHeights);
+            const col = kept ?? findShortestColumnIndex(columnHeights);
             nextHeights[i] = height;
             nextCols[i] = col;
             appendToColumn(columnHeights, col, height, rowGap);
