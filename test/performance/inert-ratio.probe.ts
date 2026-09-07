@@ -1,7 +1,7 @@
 /**
  * Deterministic render-count probe for the window-shift inertia guard (#2):
  * simulating a scroll through a 10k-item list at various speeds, how often
- * does isWindowShiftInert reject the update (saving a flushSync render).
+ * does isRangeInert reject the update (saving a flushSync render).
  *
  * This is the CI signal: inert % and commits per 1000px are deterministic
  * given the seeded heights, so any delta is meaningful. Wall-clock timing
@@ -18,11 +18,11 @@ import {
     buildFilled,
     getWindowRange,
     makeHeights,
-} from "./positioner.ts";
+} from "./fixtures.ts";
 
 const HEIGHTS = makeHeights(10_000);
 const filled = buildFilled(HEIGHTS);
-const totalHeight = filled.shortestColumn();
+const totalHeight = filled.tallestColumn();
 
 function simulate(name: string, pxPerSecond: number) {
     const step = Math.max(1, Math.round(pxPerSecond / 60));
@@ -32,7 +32,7 @@ function simulate(name: string, pxPerSecond: number) {
 
     for (let scrollTop = 5_000; scrollTop < totalHeight - VIEWPORT_HEIGHT; scrollTop += step) {
         const next = getWindowRange(scrollTop, VIEWPORT_HEIGHT, OVERSCAN);
-        const isInert = filled.isWindowShiftInert(previous.start, previous.end, next.start, next.end);
+        const isInert = filled.isRangeInert(previous.start, previous.end, next.start, next.end);
         if (isInert) {
             inert += 1;
         } else {

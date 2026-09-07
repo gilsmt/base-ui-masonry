@@ -27,18 +27,28 @@
     },
     "scripts": {
         "type-check": "tsc --noEmit",
-        "bench": "bun run bench/masonry-positioner.bench.ts && bun run bench/inert-ratio-probe.ts && bun run bench/reflow-span-probe.ts && bun run bench/scaling-probe.ts && bun run bench/masonry-render-count.bench.ts",
-        "bench:timing": "echo 'timing is environment noise in CI (different machines); run mitata locally on a quiet machine — see bench/*.ts headers'"
+        "test": "bun test test/unit test/ssr test/conformance",
+        "test:unit": "bun test test/unit",
+        "test:ssr": "bun test test/ssr",
+        "test:conformance": "bun test test/conformance",
+        "test:all": "bun run test && bun run size && bun run type-check",
+        "probe": "bun run test/performance/positioner.probe.ts && bun run test/performance/inert-ratio.probe.ts && bun run test/performance/reflow-span.probe.ts && bun run test/performance/scaling.probe.ts && bun run test/performance/render-count.probe.tsx",
+        "probe:timing": "echo 'timing is environment noise in CI (different machines); run mitata locally on a quiet machine — see test/performance/*.probe.ts headers'",
+        "size": "bun run test/bundle-size/check.ts",
+        "size:update": "bun run test/bundle-size/check.ts --update",
+        "bench": "bun run probe",
+        "bench:timing": "bun run probe:timing",
+        "hooks:install": "git config core.hooksPath .githooks"
     },
     "dependencies": {
-        "@base-ui/react": "^1.7.0",
-        "@base-ui/utils": "^0.3.2"
+        "@base-ui/react": "^1.8.0",
+        "@base-ui/utils": "^0.4.0"
     },
     "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^25.6.2",
         "@types/react": "^19.2.18",
-        "@types/react-dom": "^19.2.5",
+        "@types/react-dom": "^19.2.7",
         "babel-plugin-react-compiler": "^1.0.0",
         "mitata": "^1.0.34",
         "typescript": "7.0.2"
