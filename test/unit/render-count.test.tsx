@@ -267,7 +267,7 @@ describe("ItemSlot · memoization render counts", () => {
         item: unknown;
         itemCount: number;
         left: number;
-        register: (node: HTMLElement) => (() => void) | undefined;
+        register: (node: HTMLElement | null) => (() => void) | undefined;
         render: (item: unknown, index: number) => React.ReactElement;
         top: number;
         width: number;

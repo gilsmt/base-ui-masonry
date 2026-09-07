@@ -1,4 +1,3 @@
-export { MasonryItem, MasonryRoot } from "./masonry";
 export type {
     MasonryItemProps,
     MasonryItemState,
@@ -6,3 +5,4 @@ export type {
     MasonryRootProps,
     MasonryRootState,
 } from "./masonry";
+export { MasonryItem, MasonryRoot } from "./masonry";

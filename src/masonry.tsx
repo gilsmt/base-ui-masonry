@@ -486,7 +486,7 @@ interface ItemSlotProps<T = unknown> {
     item: T;
     itemCount: number;
     left: number;
-    register: (node: HTMLElement) => (() => void) | undefined;
+    register: (node: HTMLElement | null) => (() => void) | undefined;
     render: MasonryRenderFn<T>;
     top: number;
     width: number;
@@ -518,16 +518,6 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
     top,
     register,
 }: ItemSlotProps<T>): React.ReactElement | null {
-    const registerNode = React.useCallback(
-        (node: HTMLDivElement | null) => {
-            if (node === null) {
-                return;
-            }
-            return register(node);
-        },
-        [register],
-    );
-
     let element: React.ReactElement<MasonryItemSlotProps> | null = null;
     if (typeof render === "function") {
         const rendered = item === null || item === undefined ? null : render(item, index);
@@ -542,7 +532,7 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
         }
     }
 
-    const mergedRefs = useMergedRefs(registerNode, element ? getReactElementRef(element) : null);
+    const mergedRefs = useMergedRefs(register, element ? getReactElementRef(element) : null);
 
     const defaultStyle: React.CSSProperties = {
         contain: "layout",
@@ -824,7 +814,10 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
 
     useIsoLayoutEffect(() => () => itemResizeObserver?.disconnect(), [itemResizeObserver]);
 
-    const registerItem = useStableCallback((node: HTMLElement) => {
+    const registerItem = useStableCallback((node: HTMLElement | null) => {
+        if (node === null) {
+            return;
+        }
         itemResizeObserver?.observe(node);
         return () => {
             // Unregister
