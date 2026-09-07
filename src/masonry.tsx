@@ -3,6 +3,8 @@
 import type { BaseUIComponentProps } from "@base-ui/react/internals/types";
 import { useRenderElement } from "@base-ui/react/internals/useRenderElement";
 import { addEventListener } from "@base-ui/utils/addEventListener";
+import { areArraysEqual } from "@base-ui/utils/areArraysEqual";
+import { fastObjectShallowCompare } from "@base-ui/utils/fastObjectShallowCompare";
 import { getReactElementRef } from "@base-ui/utils/getReactElementRef";
 import { mergeCleanups } from "@base-ui/utils/mergeCleanups";
 import { ownerDocument, ownerWindow } from "@base-ui/utils/owner";
@@ -129,13 +131,8 @@ interface PositionerOptions {
     rowGap: number;
 }
 
-function areOptionsEqual(a: PositionerOptions, b: PositionerOptions): boolean {
-    return (
-        a.columnCount === b.columnCount &&
-        a.columnWidth === b.columnWidth &&
-        a.columnGap === b.columnGap &&
-        a.rowGap === b.rowGap
-    );
+function normalizeOptions(options: PositionerOptions): PositionerOptions {
+    return { ...options, rowGap: Math.max(0, options.rowGap) };
 }
 
 export function parseOptions({
@@ -247,7 +244,7 @@ export class Positioner {
     private cachedLayout: MasonryLayout | null;
 
     constructor(options: PositionerOptions, defaultItemHeight = DEFAULT_ITEM_HEIGHT) {
-        this.options = { ...options, rowGap: Math.max(0, options.rowGap) };
+        this.options = normalizeOptions(options);
         this.defaultItemHeight = parsePositive(defaultItemHeight, DEFAULT_ITEM_HEIGHT);
         this.heights = [];
         this.cols = [];
@@ -339,15 +336,18 @@ export class Positioner {
         }
     }
     setOptions(options: PositionerOptions): boolean {
-        if (areOptionsEqual(this.options, options)) {
+        if (fastObjectShallowCompare(this.options, options)) {
             return false;
         }
-        this.options = { ...options, rowGap: Math.max(0, options.rowGap) };
+        this.options = normalizeOptions(options);
         this.reassignAll();
         this.cachedLayout = null;
         return true;
     }
     syncItems(prevKeys: Keys, nextKeys: Keys): boolean {
+        if (prevKeys === nextKeys) {
+            return false;
+        }
         const heightByKey = new Map<React.Key, number>();
         const colByKey = new Map<React.Key, number>();
         for (let i = 0; i < prevKeys.length; i += 1) {
@@ -401,11 +401,7 @@ export class Positioner {
             nextCols[i] = col;
             appendToColumn(columnHeights, col, height, rowGap);
         }
-        if (
-            nextHeights.length === this.heights.length &&
-            nextHeights.every((h, i) => h === this.heights[i]) &&
-            nextCols.every((c, i) => c === this.cols[i])
-        ) {
+        if (areArraysEqual(nextHeights, this.heights) && areArraysEqual(nextCols, this.cols)) {
             return false;
         }
         this.heights = nextHeights;
