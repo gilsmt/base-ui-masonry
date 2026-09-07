@@ -173,9 +173,7 @@ function appendToColumn(
     rowGap: number,
 ): number {
     const top = (columnHeights[col] ?? -rowGap) + rowGap;
-
     columnHeights[col] = top + height;
-
     return top;
 }
 
@@ -737,16 +735,15 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             return;
         }
 
-        const pending = pendingMap;
         const previous = measurementsRef.current;
         const scrollY = container ? container.scrollTop : ownerWindow(root).scrollY;
 
         const wasDirty = isDirtyRef.current;
-        if (!wasDirty && scrollY === previous.scrollY && pending.size === 0) {
+        if (!wasDirty && scrollY === previous.scrollY && pendingMap.size === 0) {
             return;
         }
 
-        const layoutMutated = positioner.flushPending(pending);
+        const layoutMutated = positioner.flushPending(pendingMap);
         isDirtyRef.current = false;
 
         let measured: Measurements | null = null;
