@@ -498,21 +498,25 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
     top,
     register,
 }: ItemSlotProps<T>): React.ReactElement | null {
-    let element: React.ReactElement<MasonryItemSlotProps> | null = null;
+    const missingItem = item === null || item === undefined;
+    let renderedElement: React.ReactElement<MasonryItemSlotProps> | null = null;
     if (typeof render === "function") {
-        const rendered = item === null || item === undefined ? null : render(item, index);
+        const rendered = missingItem ? null : render(item, index);
         if (React.isValidElement<MasonryItemSlotProps>(rendered)) {
-            element = rendered;
+            renderedElement = rendered;
         } else {
             warn(
-                item === null || item === undefined
+                missingItem
                     ? "MasonryRoot: `items` contains null or undefined entries; they render as empty placeholders."
                     : "MasonryRoot: the `children` render function must return a React element; an empty placeholder is rendered instead.",
             );
         }
     }
 
-    const mergedRefs = useMergedRefs(register, element ? getReactElementRef(element) : null);
+    const mergedRefs = useMergedRefs(
+        register,
+        renderedElement ? getReactElementRef(renderedElement) : null,
+    );
 
     const defaultStyle: React.CSSProperties = {
         contain: "layout",
@@ -524,20 +528,23 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
         writingMode: "horizontal-tb",
     };
 
-    if (!element) {
-        element = React.createElement<MasonryItemSlotProps>(MasonryItem);
-    }
-
-    return React.cloneElement(element, {
+    const element = renderedElement ?? React.createElement<MasonryItemSlotProps>(MasonryItem);
+    const defaultProps: MasonryItemSlotProps = {
         [MasonryDataAttributes.index]: index,
         ref: mergedRefs,
         ...("aria-posinset" in element.props ? {} : { "aria-posinset": index + 1 }),
         ...("aria-setsize" in element.props ? {} : { "aria-setsize": itemCount }),
         style: { ...defaultStyle, ...element.props.style },
-    });
+    };
+
+    return React.cloneElement(element, defaultProps);
 }, areItemSlotPropsEqual) as <T>(props: ItemSlotProps<T>) => React.ReactElement | null;
 
 type Keys = (React.Key | null)[];
+
+function toItemKey(value: unknown): React.Key | null {
+    return typeof value === "string" || typeof value === "number" ? value : null;
+}
 
 function getItemKeys<T>(
     items: readonly T[],
@@ -551,15 +558,13 @@ function getItemKeys<T>(
         let key: React.Key | null;
 
         if (getItemKey && item !== null && item !== undefined) {
-            const id = getItemKey(item);
-            key = typeof id === "string" || typeof id === "number" ? id : null;
+            key = toItemKey(getItemKey(item));
         } else {
             const source: unknown = item;
             if (typeof source === "object" && source !== null && "id" in source) {
-                const id = source.id;
-                key = typeof id === "string" || typeof id === "number" ? id : null;
+                key = toItemKey(source.id);
             } else {
-                key = typeof source === "string" || typeof source === "number" ? source : null;
+                key = toItemKey(source);
             }
         }
 
@@ -730,41 +735,40 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             return;
         }
 
-        const layoutMutated = positioner.flushPending(pendingMap);
+        let layoutDidChange = positioner.flushPending(pendingMap);
         isDirtyRef.current = false;
 
         let measured: Measurements | null = null;
-        let didSyncPositioner = false;
 
         if (wasDirty) {
             const containerOffset =
                 root.getBoundingClientRect().top -
                 (container ? container.getBoundingClientRect().top + container.clientTop : 0) +
                 scrollY;
-            const containerWidth = root.clientWidth;
-            const windowHeight = container
+            const nextContainerWidth = root.clientWidth;
+            const nextWindowHeight = container
                 ? container.clientHeight
                 : ownerDocument(root).documentElement.clientHeight;
 
-            const nextOptions = buildOptions(containerWidth);
-            didSyncPositioner = positioner.setOptions(nextOptions);
+            const nextOptions = buildOptions(nextContainerWidth);
+            layoutDidChange = positioner.setOptions(nextOptions) || layoutDidChange;
 
             measured = {
                 containerOffset,
-                containerWidth,
+                containerWidth: nextContainerWidth,
                 scrollY,
-                windowHeight,
+                windowHeight: nextWindowHeight,
             };
         }
 
         const next = nextMeasurements(positioner, previous, scrollY, overscan, measured);
-        if (next === null && !layoutMutated && !didSyncPositioner) {
+        if (next === null && !layoutDidChange) {
             return;
         }
         flushSync(() => {
             if (next !== null) {
                 setMeasurements(next);
-            } else if (layoutMutated || didSyncPositioner) {
+            } else {
                 rerender();
             }
         });
@@ -799,7 +803,6 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         }
         itemResizeObserver?.observe(node);
         return () => {
-            // Unregister
             itemResizeObserver?.unobserve(node);
             pendingMap.delete(node);
         };
