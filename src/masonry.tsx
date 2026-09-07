@@ -786,8 +786,8 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         return new ResizeObserver((entries) => {
             for (const entry of entries) {
                 pendingMap.set(entry.target, entry.borderBoxSize[0].blockSize);
-                requestFlush();
             }
+            requestFlush();
         });
     }).current;
 
