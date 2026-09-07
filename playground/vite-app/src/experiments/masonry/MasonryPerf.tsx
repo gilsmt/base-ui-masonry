@@ -136,8 +136,8 @@ function BenchTree(props: {
   const { items, columnWidth, gap, overscan } = props;
   return (
     <div className={styles.masonryFrame}>
-      <MasonryRoot columnWidth={columnWidth} gap={gap} overscan={overscan} itemHeight={200}>
-        {items.map((item) => (
+      <MasonryRoot items={items} columnWidth={columnWidth} gap={gap} overscan={overscan} itemHeight={200}>
+        {(item) => (
           <MasonryItem key={item.id}>
             <article className={styles.card}>
               <div
@@ -153,7 +153,7 @@ function BenchTree(props: {
               </div>
             </article>
           </MasonryItem>
-        ))}
+        )}
       </MasonryRoot>
     </div>
   );

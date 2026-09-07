@@ -1,5 +1,6 @@
 import type * as React from 'react';
 import MasonryDemo from './experiments/masonry/MasonryDemo';
+import SidePanelDemo from './experiments/masonry/SidePanelDemo';
 import MasonryPerf from './experiments/masonry/MasonryPerf';
 import ScrollPerf from './experiments/masonry/ScrollPerf';
 
@@ -32,6 +33,14 @@ export const routes: RouteEntry[] = [
     label: 'Grid',
     description: 'image-only, async heights, practical for benchmarking',
     element: <MasonryDemo />,
+    showInNav: true,
+  },
+  {
+    type: 'route',
+    path: '/masonry/side-panel',
+    label: 'Side-panel resize',
+    description: 'panel expands, masonry width shrinks, items reposition',
+    element: <SidePanelDemo />,
     showInNav: true,
   },
   { type: 'header', label: 'Performance benchmarks' },

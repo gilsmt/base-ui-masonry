@@ -301,7 +301,7 @@ export default function MasonryDemo() {
                     style={{ height: "72vh", maxHeight: 860 }}
                 >
                     <div className={`${styles.masonryFrame} !border-0 !bg-white`}>
-                        <MasonryRoot
+                        <MasonryRoot items={pins}
                             columnWidth={columnWidth}
                             gap={gap}
                             maxColumnCount={maxColumnCount}
@@ -310,11 +310,11 @@ export default function MasonryDemo() {
                             itemHeight={320}
                             container={scrollContainer}
                         >
-                            {pins.map((pin) => (
+                            {(pin) => (
                                 <MasonryItem key={pin.id}>
                                     <PinCard pin={pin} />
                                 </MasonryItem>
-                            ))}
+                            )}
                         </MasonryRoot>
                     </div>
                     <Sentinel
@@ -327,7 +327,7 @@ export default function MasonryDemo() {
             ) : (
                 <>
                     <div className={styles.masonryFrame}>
-                        <MasonryRoot
+                        <MasonryRoot items={pins}
                             columnWidth={columnWidth}
                             gap={gap}
                             maxColumnCount={maxColumnCount}
@@ -335,11 +335,11 @@ export default function MasonryDemo() {
                             columnCount={columnCount}
                             itemHeight={320}
                         >
-                            {pins.map((pin) => (
+                            {(pin) => (
                                 <MasonryItem key={pin.id}>
                                     <PinCard pin={pin} />
                                 </MasonryItem>
-                            ))}
+                            )}
                         </MasonryRoot>
                     </div>
                     <Sentinel

@@ -206,14 +206,14 @@ export default function ScrollPerf() {
 
       <div ref={rootRef} className={styles.masonryFrame}>
         <React.Profiler id="masonry-scroll" onRender={onRender}>
-          <MasonryRoot columnWidth={240} gap={12} overscan={2} itemHeight={200}>
-            {items.map((item) => (
+          <MasonryRoot items={items} columnWidth={240} gap={12} overscan={2} itemHeight={200}>
+            {(item) => (
               <MasonryItem key={item.id}>
                 <article
                   style={{ height: item.height, background: `oklch(76% 0.12 ${item.tint}deg)` }}
                 />
               </MasonryItem>
-            ))}
+            )}
           </MasonryRoot>
         </React.Profiler>
       </div>
