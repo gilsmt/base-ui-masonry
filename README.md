@@ -58,8 +58,8 @@ The custom component must forward the `ref`, and spread all the received props o
 
 | Bundle                                                                   | Minified | Gzipped | Brotli  |
 | ------------------------------------------------------------------------ | -------- | ------- | ------- |
-| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 10.23 kB | 4.06 kB | 3.67 kB |
-| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 17.04 kB | 6.59 kB | 5.96 kB |
+| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 10.16 kB | 4.05 kB | 3.67 kB |
+| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.97 kB | 6.58 kB | 5.95 kB |
 
 Run `bun run size:update` to refresh.
 
