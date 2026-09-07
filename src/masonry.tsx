@@ -168,15 +168,13 @@ export function parseOptions({
 
 function appendToColumn(
     columnHeights: number[],
-    counts: number[],
     col: number,
     height: number,
     rowGap: number,
 ): number {
-    const top = (counts[col] ?? 0) === 0 ? 0 : (columnHeights[col] ?? 0) + rowGap;
+    const top = (columnHeights[col] ?? -rowGap) + rowGap;
 
     columnHeights[col] = top + height;
-    counts[col] = (counts[col] ?? 0) + 1;
 
     return top;
 }
@@ -195,8 +193,7 @@ function deriveLayout(
 ): MasonryLayout {
     const tops = new Array<number>(heights.length);
     const columnItems: number[][] = Array.from({ length: columnCount }, () => []);
-    const ends = new Array<number>(columnCount).fill(0);
-    const seen = new Array<number>(columnCount).fill(0);
+    const columnHeights = new Array<number>(columnCount).fill(-rowGap);
     let tallest = 0;
     for (let i = 0; i < heights.length; i += 1) {
         const height = heights[i];
@@ -206,9 +203,9 @@ function deriveLayout(
         const stored = cols[i];
         const col =
             stored === undefined || stored < 0 || stored >= columnCount
-                ? findShortestColumnIndex(ends)
+                ? findShortestColumnIndex(columnHeights)
                 : stored;
-        const top = appendToColumn(ends, seen, col, height, rowGap);
+        const top = appendToColumn(columnHeights, col, height, rowGap);
         tops[i] = top;
         columnItems[col]?.push(i);
         const bottom = top + height;
@@ -349,12 +346,11 @@ export class Positioner {
     }
     private reassignAll(): void {
         const { columnCount, rowGap } = this.options;
-        const columnHeights = new Array<number>(columnCount).fill(0);
-        const counts = new Array<number>(columnCount).fill(0);
+        const columnHeights = new Array<number>(columnCount).fill(-rowGap);
         for (let i = 0; i < this.heights.length; i += 1) {
             const col = findShortestColumnIndex(columnHeights);
             this.cols[i] = col;
-            appendToColumn(columnHeights, counts, col, this.heights[i] ?? 0, rowGap);
+            appendToColumn(columnHeights, col, this.heights[i] ?? 0, rowGap);
         }
     }
     setOptions(options: PositionerOptions): boolean {
@@ -388,8 +384,7 @@ export class Positioner {
         }
         const removed = prevKeys.some((key) => key !== null && !nextSet.has(key));
         const { columnCount, rowGap } = this.options;
-        const columnHeights = new Array<number>(columnCount).fill(0);
-        const counts = new Array<number>(columnCount).fill(0);
+        const columnHeights = new Array<number>(columnCount).fill(-rowGap);
         const nextHeights = new Array<number>(nextKeys.length);
         const nextCols = new Array<number>(nextKeys.length);
         for (let i = 0; i < nextKeys.length; i += 1) {
@@ -419,7 +414,7 @@ export class Positioner {
             col ??= findShortestColumnIndex(columnHeights);
             nextHeights[i] = height;
             nextCols[i] = col;
-            appendToColumn(columnHeights, counts, col, height, rowGap);
+            appendToColumn(columnHeights, col, height, rowGap);
         }
         if (
             nextHeights.length === this.heights.length &&
