@@ -1,0 +1,4 @@
+#!/bin/sh
+# Bypass with `git push --no-verify`; CI still runs on the remote.
+set -e
+exec bun run test:all

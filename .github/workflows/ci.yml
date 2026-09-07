@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Superseded runs on the same branch are wasted minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # Keep in sync with local dev (`bun --version`).
+          bun-version: 1.4.2
+
+      - run: bun install --frozen-lockfile
+
+      # bun test (unit/ssr/conformance) + bundle-size snapshot + tsc
+      - run: bun run test:all
+
+      # Probes are deterministic; a crash means fixtures drifted from src.
+      - run: bun run probe
