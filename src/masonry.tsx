@@ -195,6 +195,7 @@ function deriveLayout(
     let tallest = 0;
     for (let i = 0; i < heights.length; i += 1) {
         const height = heights[i];
+        // Columns hold only measured items (tops[i]). make sure to never push unknown-height items
         if (height === undefined) {
             continue;
         }
@@ -226,7 +227,7 @@ function findItemWindow(
     while (startLow < startHigh) {
         const mid = (startLow + startHigh) >>> 1;
         const item = items[mid];
-        if (item === undefined || (tops[item] ?? 0) + (heights[item] ?? 0) >= low) {
+        if (item === undefined || tops[item] + heights[item] >= low) {
             startHigh = mid;
         } else {
             startLow = mid + 1;
@@ -237,7 +238,7 @@ function findItemWindow(
     while (endLow < endHigh) {
         const mid = (endLow + endHigh) >>> 1;
         const item = items[mid];
-        if (item !== undefined && (tops[item] ?? 0) <= high) {
+        if (item !== undefined && tops[item] <= high) {
             endLow = mid + 1;
         } else {
             endHigh = mid;
@@ -301,13 +302,7 @@ export class Positioner {
             const { end, start } = findItemWindow(items, layout.tops, this.heights, low, high);
             for (let row = start; row < end; row += 1) {
                 const index = items[row];
-                if (index === undefined) {
-                    continue;
-                }
                 const top = layout.tops[index];
-                if (top === undefined) {
-                    continue;
-                }
                 visit(index, col * this.stride, top);
             }
         }
