@@ -1,12 +1,12 @@
 {
   "alone": {
-    "minified": 10035,
-    "gzipped": 4046,
-    "brotli": 3678
+    "minified": 10013,
+    "gzipped": 4020,
+    "brotli": 3656
   },
   "withDeps": {
-    "minified": 17213,
-    "gzipped": 6711,
-    "brotli": 6052
+    "minified": 17191,
+    "gzipped": 6691,
+    "brotli": 6037
   }
 }
