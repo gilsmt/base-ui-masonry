@@ -263,12 +263,7 @@ const _nextPastEnd = getWindowRange(totalHeight + 5_000, VIEWPORT_HEIGHT, OVERSC
 const guardCases: [string, boolean][] = [
     [
         "identical range (fast path)",
-        filled.isRangeInert(
-            REST_RANGE.start,
-            REST_RANGE.end,
-            REST_RANGE.start,
-            REST_RANGE.end,
-        ),
+        filled.isRangeInert(REST_RANGE.start, REST_RANGE.end, REST_RANGE.start, REST_RANGE.end),
     ],
     [
         "inert shift +16px (wheel tick)",
@@ -308,12 +303,7 @@ const guardCases: [string, boolean][] = [
     ],
     [
         "past end of list (empty window bail-out)",
-        filled.isRangeInert(
-            REST_RANGE.start,
-            REST_RANGE.end,
-            _nextPastEnd.start,
-            _nextPastEnd.end,
-        ),
+        filled.isRangeInert(REST_RANGE.start, REST_RANGE.end, _nextPastEnd.start, _nextPastEnd.end),
     ],
 ];
 for (const [name, v] of guardCases) {

@@ -7,15 +7,28 @@ export function buildPositioner(options: ParseOptionsInput) {
 }
 
 // Client-mount path: items sync by key with default heights, then measured
-// heights land item by item. Keys are the indexes themselves; placement only
-// depends on heights and order, so this reproduces any key naming.
+// heights land via the public flush() batch path (setItemHeight is private).
+// Keys are the indexes themselves; placement only depends on heights and
+// order, so this reproduces any key naming.
 export function buildFilled(heights: readonly number[], options: ParseOptionsInput = OPTIONS_8COL) {
     const positioner = buildPositioner(options);
-    positioner.syncItems([], Array.from(heights, (_, index) => index));
+    positioner.reconcile(
+        [],
+        Array.from(heights, (_, index) => index),
+    );
+    const pending = new Map<Element, number>();
     for (let index = 0; index < heights.length; index += 1) {
-        positioner.setItemHeight(index, getItem(heights, index));
+        pending.set(stubMeasuredNode(index), getItem(heights, index));
     }
+    positioner.flush(pending);
     return positioner;
+}
+
+function stubMeasuredNode(index: number): Element {
+    return {
+        getAttribute: (name: string) => (name === "data-index" ? String(index) : null),
+        isConnected: true,
+    } as unknown as Element;
 }
 
 export interface Placement {

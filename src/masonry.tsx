@@ -102,13 +102,13 @@ function nextMeasurements(
     const nextTop = Math.max(0, scrollY - previous.containerOffset);
     const prevWindow = parseRange(prevTop, previous.windowHeight, overscan);
     const nextWindow = parseRange(nextTop, previous.windowHeight, overscan);
-    const windowChanged = !positioner.isRangeInert(
+    const didRangeChange = !positioner.isRangeInert(
         prevWindow.start,
         prevWindow.end,
         nextWindow.start,
         nextWindow.end,
     );
-    return windowChanged ? { ...previous, scrollY } : null;
+    return didRangeChange ? { ...previous, scrollY } : null;
 }
 
 function findShortestColumnIndex(heights: number[]) {
@@ -204,40 +204,41 @@ function deriveLayout(
     return { columnItems, tallest, tops };
 }
 
-function findItemWindow(
+function findColumnRange(
     items: readonly number[],
     tops: readonly number[],
     heights: readonly number[],
-    low: number,
-    high: number,
-): { end: number; start: number } {
-    let startLow = 0;
-    let startHigh = items.length;
-    while (startLow < startHigh) {
-        const mid = (startLow + startHigh) >>> 1;
+    lo: number,
+    hi: number,
+) {
+    let startLo = 0;
+    let startHi = items.length;
+    while (startLo < startHi) {
+        const mid = (startLo + startHi) >>> 1;
         const item = items[mid];
-        if (tops[item] + heights[item] >= low) {
-            startHigh = mid;
+        if (tops[item] + heights[item] >= lo) {
+            startHi = mid;
         } else {
-            startLow = mid + 1;
+            startLo = mid + 1;
         }
     }
-    let endLow = startLow;
-    let endHigh = items.length;
-    while (endLow < endHigh) {
-        const mid = (endLow + endHigh) >>> 1;
+    let endLo = startLo;
+    let endHi = items.length;
+    while (endLo < endHi) {
+        const mid = (endLo + endHi) >>> 1;
         const item = items[mid];
-        if (tops[item] <= high) {
-            endLow = mid + 1;
+        if (tops[item] <= hi) {
+            endLo = mid + 1;
         } else {
-            endHigh = mid;
+            endHi = mid;
         }
     }
-    return { end: endLow, start: startLow };
+    return { end: endLo, start: startLo };
 }
 
 export class Positioner {
     defaultItemHeight: number;
+
     private options: PositionerOptions;
     private heights: number[];
     private cols: number[]; // cols[i] is always < options.columnCount
@@ -257,6 +258,9 @@ export class Positioner {
     get columnWidth(): number {
         return this.options.columnWidth;
     }
+    private get stride(): number {
+        return this.options.columnWidth + this.options.columnGap;
+    }
     private get layout(): MasonryLayout {
         if (!this.cachedLayout) {
             this.cachedLayout = deriveLayout(
@@ -268,35 +272,27 @@ export class Positioner {
         }
         return this.cachedLayout;
     }
-    getItemHeight(index: number): number | undefined {
-        return this.heights[index];
-    }
-    private get stride(): number {
-        return this.options.columnWidth + this.options.columnGap;
-    }
     tallestColumn(): number {
         return this.layout.tallest;
     }
-    range(
-        low: number,
-        high: number,
-        visit: (index: number, left: number, top: number) => void,
-    ): void {
-        const { layout } = this;
+    getItemHeight(index: number): number | undefined {
+        return this.heights[index];
+    }
+    range(lo: number, hi: number, visit: (index: number, left: number, top: number) => void): void {
         for (let col = 0; col < this.options.columnCount; col += 1) {
-            const items = layout.columnItems[col];
+            const items = this.layout.columnItems[col];
             if (items.length === 0) {
                 continue;
             }
-            const { end, start } = findItemWindow(items, layout.tops, this.heights, low, high);
+            const { end, start } = findColumnRange(items, this.layout.tops, this.heights, lo, hi);
             for (let row = start; row < end; row += 1) {
                 const index = items[row];
-                const top = layout.tops[index];
+                const top = this.layout.tops[index];
                 visit(index, col * this.stride, top);
             }
         }
     }
-    setItemHeight(index: number, height: number): boolean {
+    private setItemHeight(index: number, height: number): boolean {
         if (index < 0 || index >= this.heights.length) {
             return false;
         }
@@ -308,25 +304,24 @@ export class Positioner {
         this.cachedLayout = null;
         return true;
     }
-    isRangeInert(prevLow: number, prevHigh: number, nextLow: number, nextHigh: number): boolean {
-        if (prevLow === nextLow && prevHigh === nextHigh) {
+    isRangeInert(prevLo: number, prevHi: number, nextLo: number, nextHi: number): boolean {
+        if (prevLo === nextLo && prevHi === nextHi) {
             return true;
         }
-        const { layout } = this;
         for (let col = 0; col < this.options.columnCount; col += 1) {
-            const items = layout.columnItems[col];
+            const items = this.layout.columnItems[col];
             if (items.length === 0) {
                 continue;
             }
-            const prev = findItemWindow(items, layout.tops, this.heights, prevLow, prevHigh);
-            const next = findItemWindow(items, layout.tops, this.heights, nextLow, nextHigh);
+            const prev = findColumnRange(items, this.layout.tops, this.heights, prevLo, prevHi);
+            const next = findColumnRange(items, this.layout.tops, this.heights, nextLo, nextHi);
             if (prev.start !== next.start || prev.end !== next.end) {
                 return false;
             }
         }
         return true;
     }
-    private reassignAll(): void {
+    private repack(): void {
         const { columnCount, rowGap } = this.options;
         const columnHeights = new Array<number>(columnCount).fill(-rowGap);
         for (let i = 0; i < this.heights.length; i += 1) {
@@ -341,11 +336,11 @@ export class Positioner {
             return false;
         }
         this.options = nextOptions;
-        this.reassignAll();
+        this.repack();
         this.cachedLayout = null;
         return true;
     }
-    syncItems(prevKeys: Keys, nextKeys: Keys): boolean {
+    reconcile(prevKeys: Keys, nextKeys: Keys): boolean {
         if (prevKeys === nextKeys) {
             return false;
         }
@@ -405,16 +400,13 @@ export class Positioner {
         this.cachedLayout = null;
         return true;
     }
-    flushPending(pending: Map<Element, number>): boolean {
+    flush(pending: Map<Element, number>): boolean {
         if (pending.size === 0) {
             return false;
         }
-        // entries added during this flush wait for the next pass.
-        const snapshot = Array.from(pending);
-        pending.clear();
 
         let didChange = false;
-        for (const [node, height] of snapshot) {
+        for (const [node, height] of pending) {
             if (!node.isConnected) {
                 continue;
             }
@@ -426,6 +418,8 @@ export class Positioner {
                 didChange = true;
             }
         }
+        pending.clear();
+
         return didChange;
     }
 }
@@ -722,17 +716,17 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         const previous = measurementsRef.current;
         const scrollY = container ? container.scrollTop : ownerWindow(root).scrollY;
 
-        const wasDirty = isDirtyRef.current;
-        if (!wasDirty && scrollY === previous.scrollY && pendingMap.size === 0) {
+        const isDirty = isDirtyRef.current;
+        if (!isDirty && scrollY === previous.scrollY && pendingMap.size === 0) {
             return;
         }
 
-        let layoutDidChange = positioner.flushPending(pendingMap);
+        let layoutDidChange = positioner.flush(pendingMap);
         isDirtyRef.current = false;
 
         let measured: Measurements | null = null;
 
-        if (wasDirty) {
+        if (isDirty) {
             const containerOffset =
                 root.getBoundingClientRect().top -
                 (container ? container.getBoundingClientRect().top + container.clientTop : 0) +
@@ -837,7 +831,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
 
             positioner.defaultItemHeight = itemHeight;
 
-            let didChange = positioner.syncItems(prevKeys ?? [], keys);
+            let didChange = positioner.reconcile(prevKeys ?? [], keys);
             didChange = positioner.setOptions(currentOptions) || didChange;
 
             if (didChange) {

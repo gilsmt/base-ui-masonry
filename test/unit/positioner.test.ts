@@ -74,9 +74,9 @@ describe("isRangeInert", () => {
         const previous = getWindowRange(0, 800, Infinity);
         const next = getWindowRange(5000, 800, Infinity);
         expect(previous).toEqual(next);
-        expect(
-            positioner.isRangeInert(previous.start, previous.end, next.start, next.end),
-        ).toBe(true);
+        expect(positioner.isRangeInert(previous.start, previous.end, next.start, next.end)).toBe(
+            true,
+        );
     });
 
     test("an empty positioner is inert for any scroll", () => {
@@ -182,12 +182,27 @@ const KEYS_OPTIONS = parseOptions({
 });
 const DEFAULT_HEIGHT = 999;
 
+function stubMeasuredNode(index: number | null, connected = true): Element {
+    // Measurement flushes only touch getAttribute and isConnected.
+    return {
+        getAttribute: (name: string) =>
+            name === "data-index" && index !== null ? String(index) : null,
+        isConnected: connected,
+    } as unknown as Element;
+}
+
+function applyHeights(positioner: Positioner, heights: number[]) {
+    const pending = new Map<Element, number>();
+    for (let index = 0; index < heights.length; index += 1) {
+        pending.set(stubMeasuredNode(index), heights[index] as number);
+    }
+    positioner.flush(pending);
+}
+
 function buildMeasured(keys: (string | null)[], heights: number[]) {
     const positioner = new Positioner(KEYS_OPTIONS, DEFAULT_HEIGHT);
-    positioner.syncItems([], keys);
-    for (let index = 0; index < heights.length; index += 1) {
-        positioner.setItemHeight(index, heights[index]);
-    }
+    positioner.reconcile([], keys);
+    applyHeights(positioner, heights);
     return positioner;
 }
 
@@ -198,7 +213,7 @@ function measuredHeights(positioner: Positioner) {
 describe("syncItems", () => {
     test("a reorder carries every measured height onto its new index", () => {
         const positioner = buildMeasured(["a", "b", "c", "d"], [100, 200, 300, 400]);
-        positioner.syncItems(["a", "b", "c", "d"], ["c", "a", "d", "b"]);
+        positioner.reconcile(["a", "b", "c", "d"], ["c", "a", "d", "b"]);
         expect(measuredHeights(positioner)).toEqual([300, 100, 400, 200]);
         // Placement is recomputed, not carried over: item "c" now leads col 0.
         expect(getPlacements(positioner)[0]).toEqual({
@@ -213,7 +228,7 @@ describe("syncItems", () => {
 
     test("a removal rebalances the surviving keys from their measurements", () => {
         const positioner = buildMeasured(["a", "b", "c"], [100, 200, 300]);
-        positioner.syncItems(["a", "b", "c"], ["a", "c"]);
+        positioner.reconcile(["a", "b", "c"], ["a", "c"]);
         expect(measuredHeights(positioner)).toEqual([100, 300]);
         // With a removal, columns are re-chosen by shortest first: "a" leads
         // col 0, "c" seeds col 1.
@@ -222,54 +237,54 @@ describe("syncItems", () => {
 
     test("an unknown key falls back to the default height; later keys still carry", () => {
         const positioner = buildMeasured(["a", "b", "c"], [100, 200, 300]);
-        positioner.syncItems(["a", "b", "c"], ["a", "x", "b", "c"]);
+        positioner.reconcile(["a", "b", "c"], ["a", "x", "b", "c"]);
         expect(measuredHeights(positioner)).toEqual([100, DEFAULT_HEIGHT, 200, 300]);
     });
 
     test("a null key takes the default height; keys after it still carry", () => {
         const positioner = buildMeasured(["a", "b", "c"], [100, 200, 300]);
-        positioner.syncItems(["a", "b", "c"], ["a", null, "c"]);
+        positioner.reconcile(["a", "b", "c"], ["a", null, "c"]);
         expect(measuredHeights(positioner)).toEqual([100, DEFAULT_HEIGHT, 300]);
     });
 
     test("stable keyless items keep their measured heights", () => {
         const positioner = buildMeasured([null, null], [100, 200]);
-        expect(positioner.syncItems([null, null], [null, null])).toBe(false);
+        expect(positioner.reconcile([null, null], [null, null])).toBe(false);
         expect(measuredHeights(positioner)).toEqual([100, 200]);
     });
 
     test("appended keyless items keep the prefix heights", () => {
         const positioner = buildMeasured([null, null], [100, 200]);
-        positioner.syncItems([null, null], [null, null, null]);
+        positioner.reconcile([null, null], [null, null, null]);
         expect(measuredHeights(positioner)).toEqual([100, 200, DEFAULT_HEIGHT]);
     });
 
     test("duplicate previous keys keep the last height", () => {
         const positioner = buildMeasured(["a", "a", "b"], [100, 200, 300]);
-        positioner.syncItems(["a", "a", "b"], ["b", "a"]);
+        positioner.reconcile(["a", "a", "b"], ["b", "a"]);
         expect(measuredHeights(positioner)).toEqual([300, 200]);
     });
 
     test("duplicate next keys each get their own placement", () => {
         const positioner = buildMeasured(["a", "b"], [100, 200]);
-        positioner.syncItems(["a", "b"], ["a", "a", "b"]);
+        positioner.reconcile(["a", "b"], ["a", "a", "b"]);
         expect(measuredHeights(positioner)).toEqual([100, 100, 200]);
     });
 
     test("appended items take the default height", () => {
         const positioner = buildMeasured(["a", "b"], [100, 200]);
-        positioner.syncItems(["a", "b"], ["a", "b", "c"]);
+        positioner.reconcile(["a", "b"], ["a", "b", "c"]);
         expect(measuredHeights(positioner)).toEqual([100, 200, DEFAULT_HEIGHT]);
     });
 
     test("a fully stable sync reports no change", () => {
         const positioner = buildMeasured(["a", "b", "c"], [100, 200, 300]);
-        expect(positioner.syncItems(["a", "b", "c"], ["a", "b", "c"])).toBe(false);
+        expect(positioner.reconcile(["a", "b", "c"], ["a", "b", "c"])).toBe(false);
     });
 
     test("a fresh positioner places every key through range()", () => {
         const positioner = new Positioner(KEYS_OPTIONS, DEFAULT_HEIGHT);
-        expect(positioner.syncItems([], ["k1", "k2"])).toBe(true);
+        expect(positioner.reconcile([], ["k1", "k2"])).toBe(true);
         let visited = 0;
         positioner.range(0, Number.POSITIVE_INFINITY, () => {
             visited += 1;
@@ -307,9 +322,9 @@ describe("setOptions", () => {
 
     test("a columnCount change reflows all items into the new columns", () => {
         const positioner = buildFilled([100, 100, 100, 100], TWO_COL_INPUT);
-        expect(
-            positioner.setOptions(parseOptions({ containerWidth: 396, columnWidth: 120 })),
-        ).toBe(true);
+        expect(positioner.setOptions(parseOptions({ containerWidth: 396, columnWidth: 120 }))).toBe(
+            true,
+        );
         expect(positioner.columnCount).toBe(3);
         expect(new Set(getPlacements(positioner).map((placement) => placement.left))).toEqual(
             new Set([0, 132, 264]),
@@ -340,7 +355,7 @@ describe("setOptions", () => {
     });
 });
 
-describe("setItemHeight", () => {
+describe("measurement commits via flush", () => {
     test("out-of-range indexes are ignored", () => {
         const positioner = buildFilled([100, 200], {
             containerWidth: 132,
@@ -348,21 +363,21 @@ describe("setItemHeight", () => {
             horizontalGap: 0,
         });
 
-        expect(positioner.setItemHeight(5, 50)).toBe(false);
-        expect(positioner.setItemHeight(-1, 50)).toBe(false);
+        expect(positioner.flush(new Map([[stubMeasuredNode(5), 50]]))).toBe(false);
+        expect(positioner.flush(new Map([[stubMeasuredNode(-1), 50]]))).toBe(false);
         expect(positioner.getItemHeight(0)).toBe(100);
         expect(positioner.getItemHeight(1)).toBe(200);
     });
 
     test("the same height is a no-op", () => {
         const positioner = buildFilled([100], { containerWidth: 132, columnWidth: 120 });
-        expect(positioner.setItemHeight(0, 100)).toBe(false);
+        expect(positioner.flush(new Map([[stubMeasuredNode(0), 100]]))).toBe(false);
     });
 
     test("zero and negative heights clamp to the 1px minimum", () => {
         const positioner = buildFilled([100, 100], { containerWidth: 132, columnWidth: 120 });
-        expect(positioner.setItemHeight(0, 0)).toBe(true);
-        expect(positioner.setItemHeight(1, -50)).toBe(true);
+        expect(positioner.flush(new Map([[stubMeasuredNode(0), 0]]))).toBe(true);
+        expect(positioner.flush(new Map([[stubMeasuredNode(1), -50]]))).toBe(true);
         expect(positioner.getItemHeight(0)).toBe(1);
         expect(positioner.getItemHeight(1)).toBe(1);
     });
@@ -376,7 +391,7 @@ describe("setItemHeight", () => {
             verticalGap: 0,
         });
         expect(positioner.tallestColumn()).toBe(200);
-        expect(positioner.setItemHeight(0, 500)).toBe(true);
+        expect(positioner.flush(new Map([[stubMeasuredNode(0), 500]]))).toBe(true);
         expect(positioner.tallestColumn()).toBe(600);
         expect(getPlacements(positioner).map((placement) => placement.top)).toEqual([0, 500]);
     });
@@ -399,7 +414,7 @@ describe("setItemHeight", () => {
                 const index = Math.floor(random() * itemCount);
                 const height = 20 + Math.floor(random() * 500);
                 updated[index] = height;
-                positioner.setItemHeight(index, height);
+                positioner.flush(new Map([[stubMeasuredNode(index), height]]));
             }
 
             // Height changes restack in place; they must land exactly where a
@@ -431,7 +446,7 @@ describe("flushPending", () => {
         pending.set(stubNode(1), 250);
         pending.set(stubNode(1), 400);
 
-        expect(positioner.flushPending(pending)).toBe(true);
+        expect(positioner.flush(pending)).toBe(true);
         expect(positioner.getItemHeight(1)).toBe(400);
         expect(pending.size).toBe(0);
     });
@@ -444,7 +459,7 @@ describe("flushPending", () => {
         });
         const pending = new Map<Element, number>([[stubNode(1, false), 400]]);
 
-        expect(positioner.flushPending(pending)).toBe(false);
+        expect(positioner.flush(pending)).toBe(false);
         expect(positioner.getItemHeight(1)).toBe(200);
         expect(pending.size).toBe(0);
     });
@@ -457,7 +472,7 @@ describe("flushPending", () => {
         });
         const pending = new Map<Element, number>([[stubNode(5), 300]]);
 
-        expect(positioner.flushPending(pending)).toBe(false);
+        expect(positioner.flush(pending)).toBe(false);
         expect(positioner.getItemHeight(0)).toBe(100);
         expect(pending.size).toBe(0);
     });
@@ -474,7 +489,7 @@ describe("flushPending", () => {
             [stubNode(1), 220],
         ]);
 
-        expect(positioner.flushPending(pending)).toBe(true);
+        expect(positioner.flush(pending)).toBe(true);
         expect(positioner.getItemHeight(0)).toBe(100);
         expect(positioner.getItemHeight(1)).toBe(220);
         expect(pending.size).toBe(0);
@@ -482,7 +497,7 @@ describe("flushPending", () => {
 
     test("an empty map reports no change", () => {
         const positioner = buildFilled([100], { containerWidth: 132, columnWidth: 120 });
-        expect(positioner.flushPending(new Map())).toBe(false);
+        expect(positioner.flush(new Map())).toBe(false);
     });
 });
 
