@@ -40,26 +40,29 @@ export interface Placement {
     top: number;
 }
 
-// One range walk over the whole layout, per column in visitation order.
+// One range walk over the whole layout, in index visitation order.
 // `row` is the item's position within its column; column identity comes from
-// the visitation `left` value (equal lefts belong to the same column).
+// the sorted `left` value (equal lefts belong to the same column).
 export function getPlacements(positioner: Positioner): Placement[] {
     const byIndex = new Map<number, Placement>();
     const rowsByLeft = new Map<number, number>();
+    const lefts = new Set<number>();
+    const visits: { index: number; left: number; top: number }[] = [];
     positioner.range(0, Number.POSITIVE_INFINITY, (index, left, top) => {
+        visits.push({ index, left, top });
+        lefts.add(left);
+    });
+    const sortedLefts = [...lefts].sort((a, b) => a - b);
+    const columnByLeft = new Map<number, number>(sortedLefts.map((left, column) => [left, column]));
+    for (const { index, left, top } of visits) {
         const height = positioner.getItemHeight(index);
         if (height === undefined) {
             throw new Error(`getPlacements: index ${index} has no measured height`);
         }
         const row = rowsByLeft.get(left) ?? 0;
         rowsByLeft.set(left, row + 1);
-        let column = 0;
-        for (const seenLeft of rowsByLeft.keys()) {
-            if (seenLeft === left) break;
-            column += 1;
-        }
-        byIndex.set(index, { column, height, index, left, row, top });
-    });
+        byIndex.set(index, { column: columnByLeft.get(left)!, height, index, left, row, top });
+    }
     return Array.from(byIndex.values()).sort((a, b) => a.index - b.index);
 }
 
@@ -73,7 +76,9 @@ export function getColumnTops(positioner: Positioner): number[][] {
             topsByLeft.set(left, [top]);
         }
     });
-    return Array.from(topsByLeft.values()).map((tops) => tops.sort((a, b) => a - b));
+    return [...topsByLeft.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, tops]) => tops.sort((a, b) => a - b));
 }
 
 export type WindowRange = { start: number; end: number };

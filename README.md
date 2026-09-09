@@ -58,8 +58,8 @@ The custom component must forward the `ref`, and spread all the received props o
 
 | Bundle                                                                   | Minified | Gzipped | Brotli  |
 | ------------------------------------------------------------------------ | -------- | ------- | ------- |
-| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.78 kB | 3.93 kB | 3.57 kB |
-| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.79 kB | 6.53 kB | 5.90 kB |
+| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.97 kB | 3.96 kB | 3.60 kB |
+| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.98 kB | 6.55 kB | 5.92 kB |
 
 Run `bun run size:update` to refresh.
 
@@ -81,7 +81,7 @@ Renders a `<div>` element.
 | fallback       | `React.ReactNode`                                                                        | -          | Content rendered before items sync: the server HTML and the pre-hydration render, when `items` is non-empty. The explicit container height is omitted while it renders, so it sizes the box.                                                     |
 | gap            | `number \| { horizontal: number; vertical: number }`                                     | -          | The gap between columns and rows in pixels. Accepts a single number for both axes or an object to configure them individually. When an object is provided, `vertical` defaults to `horizontal`.                                                  |
 | getItemKey     | `(item: T) => React.Key`                                                                 | `item.id`  | Returns the stable string or number identity of an item, used to keep measured heights attached to their item across reorders. Defaults to the `id` property for objects, or the item itself for strings and numbers.                            |
-| itemHeight     | `number`                                                                                 | `300`      | The assumed height in pixels for items before they are measured.                                                                                                                                                                                 |
+| itemHeight     | `number`                                                                                 | `300`      | The assumed height in pixels for items before they are measured. Only used for the initial estimate; changing it later does not update existing items.                                                                                           |
 | items          | `readonly T[]`                                                                           | -          | Data to display. Each item is passed to the `children` render function. Each item needs a stable identity (`id` by default, or `getItemKey`) so measured heights survive reorders. An empty list needs an explicit type: `items={[] as Item[]}`. |
 | maxColumnCount | `number`                                                                                 | `Infinity` | The maximum number of columns that can be derived from `columnWidth`. Non-finite or non-positive values mean the column count is uncapped.                                                                                                       |
 | overscan       | `number`                                                                                 | `2`        | How far beyond the viewport, as a multiple of its height, items are rendered. The window extends further below the viewport than above it. Use `Infinity` to disable windowing and render every item.                                            |

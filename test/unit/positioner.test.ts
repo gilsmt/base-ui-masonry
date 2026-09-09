@@ -531,6 +531,89 @@ describe("placement", () => {
     });
 });
 
+describe("range visitation order", () => {
+    test("visits in index order so DOM order matches item order", () => {
+        const positioner = buildFilled([100, 100, 100, 100], {
+            columnCount: 2,
+            columnWidth: 120,
+            containerWidth: 264,
+            horizontalGap: 12,
+        });
+        const visited: number[] = [];
+        positioner.range(0, Number.POSITIVE_INFINITY, (index) => {
+            visited.push(index);
+        });
+        // Column-major would be [0, 2, 1, 3]; index order keeps list semantics.
+        expect(visited).toEqual([0, 1, 2, 3]);
+    });
+
+    test("stays index-sorted for a windowed range", () => {
+        const positioner = buildFilled([100, 100, 100, 100], {
+            columnCount: 2,
+            columnWidth: 120,
+            containerWidth: 264,
+            horizontalGap: 12,
+        });
+        // Row 0 tops are 0, row 1 tops are 112 (100px + 12px gap).
+        const topWindow: number[] = [];
+        positioner.range(0, 50, (index) => {
+            topWindow.push(index);
+        });
+        expect(topWindow).toEqual([0, 1]);
+
+        const bottomWindow: number[] = [];
+        positioner.range(150, 300, (index) => {
+            bottomWindow.push(index);
+        });
+        expect(bottomWindow).toEqual([2, 3]);
+    });
+
+    test("getPlacements follows sorted lefts after a kept-column reorder", () => {
+        const positioner = new Positioner(KEYS_OPTIONS, 100);
+        positioner.reconcile([], ["a", "b"]);
+        const pending = new Map<Element, number>([
+            [stubMeasuredNode(0), 100],
+            [stubMeasuredNode(1), 200],
+        ]);
+        positioner.flush(pending);
+        positioner.reconcile(["a", "b"], ["b", "a"]);
+        // "b" keeps col 1 (left 138), "a" keeps col 0 (left 0).
+        expect(getPlacements(positioner)).toEqual([
+            expect.objectContaining({ column: 1, index: 0, left: 138 }),
+            expect.objectContaining({ column: 0, index: 1, left: 0 }),
+        ]);
+    });
+});
+
+describe("defaultItemHeight", () => {
+    test("constructor and assignments clamp non-positive finite values to 1px", () => {
+        expect(new Positioner(KEYS_OPTIONS, 0).defaultItemHeight).toBe(1);
+        expect(new Positioner(KEYS_OPTIONS, -5).defaultItemHeight).toBe(1);
+        const positioner = new Positioner(KEYS_OPTIONS, 300);
+        positioner.defaultItemHeight = 0;
+        expect(positioner.defaultItemHeight).toBe(1);
+        positioner.setDefaultItemHeight(-10);
+        expect(positioner.defaultItemHeight).toBe(1);
+    });
+
+    test("non-finite values fall back to 300px", () => {
+        expect(new Positioner(KEYS_OPTIONS, NaN).defaultItemHeight).toBe(300);
+        const positioner = new Positioner(KEYS_OPTIONS, 300);
+        positioner.setDefaultItemHeight(NaN);
+        expect(positioner.defaultItemHeight).toBe(300);
+    });
+
+    test("changing the default only affects subsequently added keys", () => {
+        const positioner = new Positioner(KEYS_OPTIONS, 100);
+        positioner.reconcile([], ["a", "b"]);
+        positioner.setDefaultItemHeight(999);
+        positioner.reconcile(["a", "b"], ["a", "b", "c"]);
+        expect(positioner.getItemHeight(0)).toBe(100);
+        expect(positioner.getItemHeight(1)).toBe(100);
+        expect(positioner.getItemHeight(2)).toBe(999);
+    });
+});
+
 describe("parseOptions", () => {
     test("derives the column count from the container width", () => {
         expect(parseOptions({ containerWidth: 1600 })).toEqual({

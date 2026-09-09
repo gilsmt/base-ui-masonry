@@ -237,8 +237,7 @@ function findColumnRange(
 }
 
 export class Positioner {
-    defaultItemHeight: number;
-
+    private _defaultItemHeight!: number;
     private options: PositionerOptions;
     private heights: number[];
     private cols: number[]; // cols[i] is always < options.columnCount
@@ -246,7 +245,7 @@ export class Positioner {
 
     constructor(options: PositionerOptions, defaultItemHeight = DEFAULT_ITEM_HEIGHT) {
         this.options = normalizeOptions(options);
-        this.defaultItemHeight = parsePositive(defaultItemHeight, DEFAULT_ITEM_HEIGHT);
+        this.defaultItemHeight = defaultItemHeight;
         this.heights = [];
         this.cols = [];
         this.cachedLayout = null;
@@ -257,6 +256,12 @@ export class Positioner {
     }
     get columnWidth(): number {
         return this.options.columnWidth;
+    }
+    get defaultItemHeight(): number {
+        return this._defaultItemHeight;
+    }
+    set defaultItemHeight(height: number) {
+        this._defaultItemHeight = parseMin(height, 1, DEFAULT_ITEM_HEIGHT);
     }
     private get stride(): number {
         return this.options.columnWidth + this.options.columnGap;
@@ -279,6 +284,7 @@ export class Positioner {
         return this.heights[index];
     }
     range(lo: number, hi: number, visit: (index: number, left: number, top: number) => void): void {
+        const queue: number[] = [];
         for (let col = 0; col < this.options.columnCount; col += 1) {
             const items = this.layout.columnItems[col];
             if (items.length === 0) {
@@ -286,10 +292,12 @@ export class Positioner {
             }
             const { end, start } = findColumnRange(items, this.layout.tops, this.heights, lo, hi);
             for (let row = start; row < end; row += 1) {
-                const index = items[row];
-                const top = this.layout.tops[index];
-                visit(index, col * this.stride, top);
+                queue.push(items[row]);
             }
+        }
+        queue.sort((a, b) => a - b);
+        for (const index of queue) {
+            visit(index, this.cols[index] * this.stride, this.layout.tops[index]);
         }
     }
     private setItemHeight(index: number, height: number): boolean {
@@ -303,6 +311,9 @@ export class Positioner {
         this.heights[index] = h;
         this.cachedLayout = null;
         return true;
+    }
+    setDefaultItemHeight(height: number): void {
+        this.defaultItemHeight = height;
     }
     isRangeInert(prevLo: number, prevHi: number, nextLo: number, nextHi: number): boolean {
         if (prevLo === nextLo && prevHi === nextHi) {
@@ -657,7 +668,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         columnWidth = DEFAULT_COLUMN_WIDTH,
         gap,
         getItemKey,
-        itemHeight: itemHeightProp = DEFAULT_ITEM_HEIGHT,
+        itemHeight = DEFAULT_ITEM_HEIGHT,
         maxColumnCount: maxColumnCountProp,
         overscan: overscanProp = DEFAULT_OVERSCAN,
         container = null,
@@ -669,7 +680,6 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
     } = componentProps;
 
     const { horizontalGap, verticalGap } = parseGap(gap);
-    const itemHeight = parseMin(itemHeightProp, 1, DEFAULT_ITEM_HEIGHT);
     const overscan = parseNonNegative(overscanProp, DEFAULT_OVERSCAN);
 
     const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -829,8 +839,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             const prevKeys = keysRef.current;
             keysRef.current = keys;
 
-            positioner.defaultItemHeight = itemHeight;
-
+            positioner.setDefaultItemHeight(itemHeight);
             let didChange = positioner.reconcile(prevKeys ?? [], keys);
             didChange = positioner.setOptions(currentOptions) || didChange;
 
