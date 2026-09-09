@@ -670,8 +670,6 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
     const measurementsRef = useValueAsRef(measurements);
     const isDirtyRef = React.useRef(true);
 
-    const scrollTop = Math.max(0, measurements.scrollY - measurements.containerOffset);
-
     const buildOptions = React.useCallback(
         (width: number) =>
             parseOptions({
@@ -828,6 +826,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         [keys, currentOptions, itemHeight, rerender, requestDirtyFlush],
     );
 
+    const scrollTop = Math.max(0, measurements.scrollY - measurements.containerOffset);
     const { start: rangeStart, end: rangeEnd } = parseRange(scrollTop, windowHeight, overscan);
     const positionedChildren: React.ReactElement[] = [];
 
