@@ -673,11 +673,11 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
     const scrollTop = Math.max(0, measurements.scrollY - measurements.containerOffset);
 
     const buildOptions = React.useCallback(
-        (containerWidth: number) =>
+        (width: number) =>
             parseOptions({
                 columnCount,
                 columnWidth,
-                containerWidth,
+                containerWidth: width,
                 horizontalGap,
                 maxColumnCount: maxColumnCountProp,
                 verticalGap,
