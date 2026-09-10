@@ -291,11 +291,13 @@ export class Positioner {
         if (index < 0 || index >= this.heights.length) {
             return false;
         }
-        const h = parsePositiveNumber(height, MINIMUM_COLUMN_WIDTH);
-        if (this.heights[index] === h) {
+        if (!Number.isFinite(height) || height < 0) {
             return false;
         }
-        this.heights[index] = h;
+        if (this.heights[index] === height) {
+            return false;
+        }
+        this.heights[index] = height;
         this.cachedLayout = null;
         return true;
     }
@@ -740,10 +742,10 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             return;
         }
         flushSync(() => {
-            if (next !== null) {
-                setMeasurements(next);
-            } else {
+            if (next === null) {
                 rerender();
+            } else {
+                setMeasurements(next);
             }
         });
     });
