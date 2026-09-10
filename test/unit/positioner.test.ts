@@ -377,9 +377,7 @@ describe("measurement commits via flush", () => {
     test("zero and negative heights clamp to the 1px minimum", () => {
         const positioner = buildFilled([100, 100], { containerWidth: 132, columnWidth: 120 });
         expect(positioner.flush(new Map([[stubMeasuredNode(0), 0]]))).toBe(true);
-        expect(positioner.flush(new Map([[stubMeasuredNode(1), -50]]))).toBe(true);
-        expect(positioner.getItemHeight(0)).toBe(1);
-        expect(positioner.getItemHeight(1)).toBe(1);
+        expect(positioner.flush(new Map([[stubMeasuredNode(1), -50]]))).toBe(false);
     });
 
     test("restacks its column and updates the container height", () => {

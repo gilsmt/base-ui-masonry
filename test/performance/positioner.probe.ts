@@ -26,7 +26,7 @@
  *   - container resize:       setOptions                 (useIsoLayoutEffect)
  *   - every scroll frame:     isRangeInert               (runs BEFORE any render)
  *     + when non-inert:       range(low, high)           (render of MasonryRoot)
- *   - measurement commits:    flushPending -> setItemHeight (one rAF batch each)
+ *   -  :    flushPending -> setItemHeight (one rAF batch each)
  *
  * Run (fast, deterministic): bun run test/performance/positioner.probe.ts
  * Optional local timing:     bun run test/performance/positioner.probe.ts --timing
