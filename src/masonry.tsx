@@ -497,9 +497,9 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
 
     const defaultStyle: React.CSSProperties = {
         contain: "layout",
-        left: 0,
+        insetBlockStart: 0,
+        insetInlineStart: 0,
         position: "absolute",
-        top: 0,
         transform: `translateX(${left}px) translateY(${top}px)`,
         width,
         writingMode: "horizontal-tb",
