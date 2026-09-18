@@ -270,21 +270,23 @@ export class Positioner {
         return this.heights[index];
     }
     range(lo: number, hi: number, visit: (index: number, left: number, top: number) => void): void {
+        const { columnItems, tops } = this.layout;
+        const { columnCount, columnGap, columnWidth } = this.options;
         const queue: number[] = [];
-        const stride = this.options.columnWidth + this.options.columnGap;
-        for (let col = 0; col < this.options.columnCount; col += 1) {
-            const items = this.layout.columnItems[col];
+        const stride = columnWidth + columnGap;
+        for (let col = 0; col < columnCount; col += 1) {
+            const items = columnItems[col];
             if (items.length === 0) {
                 continue;
             }
-            const { end, start } = findColumnRange(items, this.layout.tops, this.heights, lo, hi);
+            const { end, start } = findColumnRange(items, tops, this.heights, lo, hi);
             for (let row = start; row < end; row += 1) {
                 queue.push(items[row]);
             }
         }
         queue.sort((a, b) => a - b);
         for (const index of queue) {
-            visit(index, this.cols[index] * stride, this.layout.tops[index]);
+            visit(index, this.cols[index] * stride, tops[index]);
         }
     }
     private setItemHeight(index: number, height: number): boolean {
