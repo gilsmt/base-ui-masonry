@@ -58,7 +58,7 @@ The custom component must forward the `ref`, and spread all the received props o
 
 | Bundle                                                                   | Minified | Gzipped | Brotli  |
 | ------------------------------------------------------------------------ | -------- | ------- | ------- |
-| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.75 kB | 3.92 kB | 3.55 kB |
+| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.75 kB  | 3.92 kB | 3.55 kB |
 | `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.76 kB | 6.51 kB | 5.88 kB |
 
 Run `bun run size:update` to refresh.
@@ -143,6 +143,10 @@ this component deliberately lacks. Listed so you can decide whether they matter 
 
 - **No imperative API.** For jump-to-item UIs: Rendered items expose `data-index`, so you can find one with `container.querySelector('[data-index="42"]')` and call `scrollIntoView()`. Items outside the rendered window have no DOM node — scroll to an estimated offset derived from `itemHeight` instead, then refine once the item mounts.
 - **No RTL support.** Columns are placed left-to-right, so `direction: rtl` does not mirror the layout: the first column remains leftmost even when the reading order is right-to-left. Screen-reader order follows source order.
+- **No column spanning or variable column widths.** Every item occupies exactly one equal-width column. There is no `colSpan` prop. For hero/feature tiles, render a separate block above or below `MasonryRoot`, or use CSS grid for that section.
+- **Vertical-only; no horizontal mode.** Windowing runs on `scrollTop`/`windowHeight` and the container height is the tallest column.
+- **No per-item height seeding.** Only the uniform `itemHeight` estimate exists; real heights always come from `ResizeObserver`. When image aspect ratios are known at render time, pick a realistic `itemHeight` to minimize shift — known per-item heights cannot be passed in to skip measurement.
+- **No enter/exit animation support.** Filtering, insertion, and removal re-layout immediately, and off-window items unmount by design. CSS `transition` on `transform` and layout-animation libraries fight measurement. For small animated lists, use `overscan={Infinity}` to disable windowing first.
 - **`columnWidth` is a _preferred_ width** used to derive the column count. Items will always try to stretch to fill their (equal-width) columns for consistency.
 - **Items need a stable identity.** Each item must have a string or number `id` property (or supply `getItemKey`). The identity keeps measured heights attached to their item across reorders, insertions, and removals; without it, a reorder discards the measured heights and the layout is re-measured. The `key` you set on `MasonryItem` in the render function is for React reconciliation only — the `id`/`getItemKey` identity is what the layout uses.
 - The rendered window extends further below the viewport than above it: scrolling down races the unmeasured frontier (render + measurement lag), while everything above is already placed and only needs render-lag cover.

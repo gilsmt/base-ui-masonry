@@ -350,13 +350,9 @@ export class Positioner {
         const colByKey = new Map<React.Key, number>();
         for (let i = 0; i < prevKeys.length; i += 1) {
             const key = prevKeys[i];
-            const height = this.heights[i];
-            if (key !== null && height !== undefined) {
-                heightByKey.set(key, height);
-                const col = this.cols[i];
-                if (col !== undefined) {
-                    colByKey.set(key, col);
-                }
+            if (key !== null) {
+                heightByKey.set(key, this.heights[i]);
+                colByKey.set(key, this.cols[i]);
             }
         }
         const nextSet = new Set<React.Key>();
