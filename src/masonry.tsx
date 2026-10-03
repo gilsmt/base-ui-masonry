@@ -69,13 +69,13 @@ export function parseRange(scrollTop: number, windowHeight: number, overscan: nu
     };
 }
 
-function nextMeasurements(
+function nextDimensions(
     positioner: Positioner,
-    previous: Measurements,
+    previous: Dimensions,
     scrollY: number,
     overscan: number,
-    measured: Measurements | null,
-): Measurements | null {
+    measured: Dimensions | null,
+): Dimensions | null {
     if (
         measured !== null &&
         (measured.containerOffset !== previous.containerOffset ||
@@ -418,14 +418,14 @@ export class Positioner {
     }
 }
 
-interface Measurements {
+interface Dimensions {
     containerOffset: number;
     containerWidth: number;
     scrollY: number;
     windowHeight: number;
 }
 
-const INITIAL_MEASUREMENTS: Measurements = {
+const INITIAL_DIMENSIONS: Dimensions = {
     containerOffset: 0,
     containerWidth: 0,
     scrollY: 0,
@@ -499,7 +499,7 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
         insetInlineStart: 0,
         margin: 0,
         position: "absolute",
-        transform: `translateX(${left}px) translateY(${top}px)`,
+        transform: `translate3d(${left}px, ${top}px, 0)`,
         width,
         writingMode: "horizontal-tb",
     };
@@ -667,9 +667,11 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
     const animationFrame = useAnimationFrame();
     const rerender = useForcedRerendering();
 
-    const [measurements, setMeasurements] = React.useState<Measurements>(INITIAL_MEASUREMENTS);
-    const measurementsRef = useValueAsRef(measurements);
+    const [dimensions, setDimensions] = React.useState<Dimensions>(INITIAL_DIMENSIONS);
+    const latestDimensionsRef = useValueAsRef(dimensions);
+
     const isDirtyRef = React.useRef(true);
+    const shouldSyncFlushQueuedRef = React.useRef(false);
 
     const buildOptions = React.useCallback(
         (width: number) =>
@@ -683,7 +685,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             }),
         [columnCount, columnWidth, horizontalGap, maxColumnCountProp, verticalGap],
     );
-    const { windowHeight, containerWidth } = measurements;
+    const { windowHeight, containerWidth } = dimensions;
     const currentOptions = React.useMemo(
         () => buildOptions(containerWidth),
         [buildOptions, containerWidth],
@@ -702,7 +704,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             return;
         }
 
-        const previous = measurementsRef.current;
+        const previous = latestDimensionsRef.current;
         const scrollY = container ? container.scrollTop : ownerWindow(root).scrollY;
 
         const isDirty = isDirtyRef.current;
@@ -713,14 +715,16 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         let layoutDidChange = positioner.flush(pendingMap);
         isDirtyRef.current = false;
 
-        let measured: Measurements | null = null;
+        let measured: Dimensions | null = null;
 
         if (isDirty) {
+            const nextContainerWidth = root.clientWidth;
+
             const containerOffset =
                 root.getBoundingClientRect().top -
                 (container ? container.getBoundingClientRect().top + container.clientTop : 0) +
                 scrollY;
-            const nextContainerWidth = root.clientWidth;
+
             const nextWindowHeight = container
                 ? container.clientHeight
                 : ownerDocument(root).documentElement.clientHeight;
@@ -736,7 +740,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             };
         }
 
-        const next = nextMeasurements(positioner, previous, scrollY, overscan, measured);
+        const next = nextDimensions(positioner, previous, scrollY, overscan, measured);
         if (next === null && !layoutDidChange) {
             return;
         }
@@ -744,13 +748,24 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             if (next === null) {
                 rerender();
             } else {
-                setMeasurements(next);
+                setDimensions(next);
             }
         });
     });
 
     const requestFlush = useStableCallback(() => {
         animationFrame.request(flush);
+    });
+
+    const requestSyncFlush = useStableCallback(() => {
+        if (shouldSyncFlushQueuedRef.current) {
+            return;
+        }
+        shouldSyncFlushQueuedRef.current = true;
+        queueMicrotask(() => {
+            shouldSyncFlushQueuedRef.current = false;
+            flush();
+        });
     });
 
     const requestDirtyFlush = useStableCallback(() => {
@@ -766,7 +781,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             for (const entry of entries) {
                 pendingMap.set(entry.target, entry.borderBoxSize[0].blockSize);
             }
-            requestFlush();
+            requestSyncFlush();
         });
     }).current;
 
@@ -791,9 +806,14 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             }
             requestDirtyFlush();
 
-            const resizeObserver = new ResizeObserver(requestDirtyFlush);
+            const resizeObserver = new ResizeObserver(() => {
+                // Any root size change can coincide with an offset or viewport
+                // shift, so remeasure even when the width is unchanged.
+                isDirtyRef.current = true;
+                requestSyncFlush();
+            });
+
             resizeObserver.observe(root);
-            resizeObserver.observe(ownerDocument(root).body);
             if (container) {
                 resizeObserver.observe(container);
             }
@@ -807,7 +827,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
                 () => resizeObserver.disconnect(),
             );
         },
-        [requestFlush, requestDirtyFlush, container],
+        [requestFlush, requestSyncFlush, requestDirtyFlush, container],
     );
 
     useIsoLayoutEffect(
@@ -827,7 +847,7 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         [keys, currentOptions, itemHeight, rerender, requestDirtyFlush],
     );
 
-    const scrollTop = Math.max(0, measurements.scrollY - measurements.containerOffset);
+    const scrollTop = Math.max(0, dimensions.scrollY - dimensions.containerOffset);
     const { start: rangeStart, end: rangeEnd } = parseRange(scrollTop, windowHeight, overscan);
     const positionedChildren: React.ReactElement[] = [];
 
