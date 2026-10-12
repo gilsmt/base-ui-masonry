@@ -48,15 +48,27 @@ function getNodeDataIndex(node: Element): number | null {
     return index >>> 0 === index ? index : null;
 }
 
-function parseMinNumber(value: number | undefined, min: number, fallback: number) {
-    return typeof value === "number" && Number.isFinite(value) ? Math.max(min, value) : fallback;
+function parseMinNumber(
+    value: number | undefined,
+    min: number,
+    fallback: number,
+) {
+    return typeof value === "number" && Number.isFinite(value)
+        ? Math.max(min, value)
+        : fallback;
 }
 
 function parsePositiveNumber(value: number | undefined, fallback: number) {
-    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+        ? value
+        : fallback;
 }
 
-export function parseRange(scrollTop: number, windowHeight: number, overscan: number) {
+export function parseRange(
+    scrollTop: number,
+    windowHeight: number,
+    overscan: number,
+) {
     if (!Number.isFinite(overscan)) {
         return { end: Number.POSITIVE_INFINITY, start: 0 };
     }
@@ -121,7 +133,11 @@ interface PositionerOptions {
 }
 
 function normalizeOptions(options: PositionerOptions): PositionerOptions {
-    return { ...options, columnGap: Math.max(0, options.columnGap), rowGap: Math.max(0, options.rowGap) };
+    return {
+        ...options,
+        columnGap: Math.max(0, options.columnGap),
+        rowGap: Math.max(0, options.rowGap),
+    };
 }
 
 export function parseOptions({
@@ -144,11 +160,22 @@ export function parseOptions({
     const rowGap = parseMinNumber(verticalGap, 0, columnGap);
     const rawWidth = parsePositiveNumber(preferredWidth, DEFAULT_COLUMN_WIDTH);
     const itemWidth = Math.max(MINIMUM_COLUMN_WIDTH, rawWidth);
-    const maxColumns = parsePositiveNumber(maxColumnCount, Number.POSITIVE_INFINITY);
-    const fittingColumns = Math.floor((width + columnGap) / (itemWidth + columnGap));
-    const requested = parsePositiveNumber(columnCount, Math.min(fittingColumns, maxColumns));
+    const maxColumns = parsePositiveNumber(
+        maxColumnCount,
+        Number.POSITIVE_INFINITY,
+    );
+    const fittingColumns = Math.floor(
+        (width + columnGap) / (itemWidth + columnGap),
+    );
+    const requested = parsePositiveNumber(
+        columnCount,
+        Math.min(fittingColumns, maxColumns),
+    );
     const count = Math.max(1, Math.floor(requested));
-    const columnWidth = Math.max(0, Math.floor((width - columnGap * (count - 1)) / count));
+    const columnWidth = Math.max(
+        0,
+        Math.floor((width - columnGap * (count - 1)) / count),
+    );
     return { columnCount: count, columnGap, columnWidth, rowGap };
 }
 
@@ -176,7 +203,10 @@ function deriveLayout(
     rowGap: number,
 ): MasonryLayout {
     const tops = new Array<number>(heights.length);
-    const columnItems: number[][] = Array.from({ length: columnCount }, () => []);
+    const columnItems: number[][] = Array.from(
+        { length: columnCount },
+        () => [],
+    );
     const columnHeights = new Array<number>(columnCount).fill(-rowGap);
     let tallest = 0;
     for (let i = 0; i < heights.length; i += 1) {
@@ -232,7 +262,10 @@ export class Positioner {
     private cols: number[]; // cols[i] is always < options.columnCount
     private cachedLayout: MasonryLayout | null;
 
-    constructor(options: PositionerOptions, defaultItemHeight = DEFAULT_ITEM_HEIGHT) {
+    constructor(
+        options: PositionerOptions,
+        defaultItemHeight = DEFAULT_ITEM_HEIGHT,
+    ) {
         this.options = normalizeOptions(options);
         this.defaultItemHeight = defaultItemHeight;
         this.heights = [];
@@ -250,7 +283,11 @@ export class Positioner {
         return this._defaultItemHeight;
     }
     set defaultItemHeight(height: number) {
-        this._defaultItemHeight = parseMinNumber(height, MINIMUM_COLUMN_WIDTH, DEFAULT_ITEM_HEIGHT);
+        this._defaultItemHeight = parseMinNumber(
+            height,
+            MINIMUM_COLUMN_WIDTH,
+            DEFAULT_ITEM_HEIGHT,
+        );
     }
     private get layout(): MasonryLayout {
         if (!this.cachedLayout) {
@@ -269,7 +306,11 @@ export class Positioner {
     getItemHeight(index: number): number | undefined {
         return this.heights[index];
     }
-    range(lo: number, hi: number, visit: (index: number, left: number, top: number) => void): void {
+    range(
+        lo: number,
+        hi: number,
+        visit: (index: number, left: number, top: number) => void,
+    ): void {
         const { columnItems, tops } = this.layout;
         const { columnCount, columnGap, columnWidth } = this.options;
         const queue: number[] = [];
@@ -279,7 +320,13 @@ export class Positioner {
             if (items.length === 0) {
                 continue;
             }
-            const { end, start } = findColumnRange(items, tops, this.heights, lo, hi);
+            const { end, start } = findColumnRange(
+                items,
+                tops,
+                this.heights,
+                lo,
+                hi,
+            );
             for (let row = start; row < end; row += 1) {
                 queue.push(items[row]);
             }
@@ -306,7 +353,12 @@ export class Positioner {
     setDefaultItemHeight(height: number): void {
         this.defaultItemHeight = height;
     }
-    isRangeInert(prevLo: number, prevHi: number, nextLo: number, nextHi: number): boolean {
+    isRangeInert(
+        prevLo: number,
+        prevHi: number,
+        nextLo: number,
+        nextHi: number,
+    ): boolean {
         if (prevLo === nextLo && prevHi === nextHi) {
             return true;
         }
@@ -315,8 +367,20 @@ export class Positioner {
             if (items.length === 0) {
                 continue;
             }
-            const prev = findColumnRange(items, this.layout.tops, this.heights, prevLo, prevHi);
-            const next = findColumnRange(items, this.layout.tops, this.heights, nextLo, nextHi);
+            const prev = findColumnRange(
+                items,
+                this.layout.tops,
+                this.heights,
+                prevLo,
+                prevHi,
+            );
+            const next = findColumnRange(
+                items,
+                this.layout.tops,
+                this.heights,
+                nextLo,
+                nextHi,
+            );
             if (prev.start !== next.start || prev.end !== next.end) {
                 return false;
             }
@@ -361,7 +425,9 @@ export class Positioner {
                 nextSet.add(key);
             }
         }
-        const removed = prevKeys.some((key) => key !== null && !nextSet.has(key));
+        const removed = prevKeys.some(
+            (key) => key !== null && !nextSet.has(key),
+        );
         const { columnCount, rowGap } = this.options;
         const columnHeights = new Array<number>(columnCount).fill(-rowGap);
         const nextHeights = new Array<number>(nextKeys.length);
@@ -388,7 +454,10 @@ export class Positioner {
             nextCols[i] = col;
             appendToColumn(columnHeights, col, height, rowGap);
         }
-        if (areArraysEqual(nextHeights, this.heights) && areArraysEqual(nextCols, this.cols)) {
+        if (
+            areArraysEqual(nextHeights, this.heights) &&
+            areArraysEqual(nextCols, this.cols)
+        ) {
             return false;
         }
         this.heights = nextHeights;
@@ -433,7 +502,9 @@ const INITIAL_DIMENSIONS: Dimensions = {
 };
 
 interface MasonryItemSlotProps
-    extends React.HTMLAttributes<HTMLDivElement>, React.RefAttributes<HTMLDivElement> {
+    extends
+        React.HTMLAttributes<HTMLDivElement>,
+        React.RefAttributes<HTMLDivElement> {
     [MasonryDataAttributes.index]?: number;
     [MasonryDataAttributes.slot]?: string;
 }
@@ -504,22 +575,32 @@ const MasonryItemSlot = React.memo(function MasonryItemSlotInner<T>({
         writingMode: "horizontal-tb",
     };
 
-    const element = renderedElement ?? React.createElement<MasonryItemSlotProps>(MasonryItem);
+    const element =
+        renderedElement ??
+        React.createElement<MasonryItemSlotProps>(MasonryItem);
     const defaultProps: MasonryItemSlotProps = {
         [MasonryDataAttributes.index]: index,
         ref: mergedRefs,
-        ...("aria-posinset" in element.props ? {} : { "aria-posinset": index + 1 }),
-        ...("aria-setsize" in element.props ? {} : { "aria-setsize": itemCount }),
+        ...("aria-posinset" in element.props
+            ? {}
+            : { "aria-posinset": index + 1 }),
+        ...("aria-setsize" in element.props
+            ? {}
+            : { "aria-setsize": itemCount }),
         style: { ...defaultStyle, ...element.props.style },
     };
 
     return React.cloneElement(element, defaultProps);
-}, areItemSlotPropsEqual) as <T>(props: ItemSlotProps<T>) => React.ReactElement | null;
+}, areItemSlotPropsEqual) as <T>(
+    props: ItemSlotProps<T>,
+) => React.ReactElement | null;
 
 type Keys = (React.Key | null)[];
 
 function toItemKey(value: unknown): React.Key | null {
-    return typeof value === "string" || typeof value === "number" ? value : null;
+    return typeof value === "string" || typeof value === "number"
+        ? value
+        : null;
 }
 
 function getItemKeys<T>(
@@ -537,7 +618,11 @@ function getItemKeys<T>(
             key = toItemKey(getItemKey(item));
         } else {
             const source: unknown = item;
-            if (typeof source === "object" && source !== null && "id" in source) {
+            if (
+                typeof source === "object" &&
+                source !== null &&
+                "id" in source
+            ) {
                 key = toItemKey(source.id);
             } else {
                 key = toItemKey(source);
@@ -639,7 +724,9 @@ export interface MasonryRootProps<T = unknown> extends Omit<
  * Groups all parts of the masonry layout.
  * Renders a `<div>` element.
  */
-export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.ReactElement {
+export function MasonryRoot<T>(
+    componentProps: MasonryRootProps<T>,
+): React.ReactElement {
     const {
         children,
         items,
@@ -658,16 +745,21 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         ...elementProps
     } = componentProps;
 
-    const horizontalGap = typeof gap === "object" && gap !== null ? gap.horizontal : gap;
-    const verticalGap = typeof gap === "object" && gap !== null ? gap.vertical : gap;
+    const horizontalGap =
+        typeof gap === "object" && gap !== null ? gap.horizontal : gap;
+    const verticalGap =
+        typeof gap === "object" && gap !== null ? gap.vertical : gap;
     const overscan =
-        typeof overscanProp === "number" && overscanProp >= 0 ? overscanProp : DEFAULT_OVERSCAN;
+        typeof overscanProp === "number" && overscanProp >= 0
+            ? overscanProp
+            : DEFAULT_OVERSCAN;
 
     const rootRef = React.useRef<HTMLDivElement | null>(null);
     const animationFrame = useAnimationFrame();
     const rerender = useForcedRerendering();
 
-    const [dimensions, setDimensions] = React.useState<Dimensions>(INITIAL_DIMENSIONS);
+    const [dimensions, setDimensions] =
+        React.useState<Dimensions>(INITIAL_DIMENSIONS);
     const latestDimensionsRef = useValueAsRef(dimensions);
 
     const isDirtyRef = React.useRef(true);
@@ -683,20 +775,32 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
                 maxColumnCount: maxColumnCountProp,
                 verticalGap,
             }),
-        [columnCount, columnWidth, horizontalGap, maxColumnCountProp, verticalGap],
+        [
+            columnCount,
+            columnWidth,
+            horizontalGap,
+            maxColumnCountProp,
+            verticalGap,
+        ],
     );
     const { windowHeight, containerWidth } = dimensions;
     const currentOptions = React.useMemo(
         () => buildOptions(containerWidth),
         [buildOptions, containerWidth],
     );
-    const positioner = useRefWithInit(() => new Positioner(currentOptions, itemHeight)).current;
+    const positioner = useRefWithInit(
+        () => new Positioner(currentOptions, itemHeight),
+    ).current;
     const pendingMap = useRefWithInit(() => new Map<Element, number>()).current;
     const keysRef = React.useRef<Keys | null>(null);
 
     const itemCount = items.length;
-    const shouldShowFallback = itemCount > 0 && keysRef.current === null && !!fallback;
-    const keys = React.useMemo(() => getItemKeys(items, getItemKey), [items, getItemKey]);
+    const shouldShowFallback =
+        itemCount > 0 && keysRef.current === null && !!fallback;
+    const keys = React.useMemo(
+        () => getItemKeys(items, getItemKey),
+        [items, getItemKey],
+    );
 
     const flush = useStableCallback(() => {
         const root = rootRef.current;
@@ -705,7 +809,9 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         }
 
         const previous = latestDimensionsRef.current;
-        const scrollY = container ? container.scrollTop : ownerWindow(root).scrollY;
+        const scrollY = container
+            ? container.scrollTop
+            : ownerWindow(root).scrollY;
 
         const isDirty = isDirtyRef.current;
         if (!isDirty && scrollY === previous.scrollY && pendingMap.size === 0) {
@@ -722,7 +828,10 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
 
             const containerOffset =
                 root.getBoundingClientRect().top -
-                (container ? container.getBoundingClientRect().top + container.clientTop : 0) +
+                (container
+                    ? container.getBoundingClientRect().top +
+                      container.clientTop
+                    : 0) +
                 scrollY;
 
             const nextWindowHeight = container
@@ -730,7 +839,8 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
                 : ownerDocument(root).documentElement.clientHeight;
 
             const nextOptions = buildOptions(nextContainerWidth);
-            layoutDidChange = positioner.setOptions(nextOptions) || layoutDidChange;
+            layoutDidChange =
+                positioner.setOptions(nextOptions) || layoutDidChange;
 
             measured = {
                 containerOffset,
@@ -740,7 +850,13 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
             };
         }
 
-        const next = nextDimensions(positioner, previous, scrollY, overscan, measured);
+        const next = nextDimensions(
+            positioner,
+            previous,
+            scrollY,
+            overscan,
+            measured,
+        );
         if (next === null && !layoutDidChange) {
             return;
         }
@@ -785,7 +901,10 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         });
     }).current;
 
-    useIsoLayoutEffect(() => () => itemResizeObserver?.disconnect(), [itemResizeObserver]);
+    useIsoLayoutEffect(
+        () => () => itemResizeObserver?.disconnect(),
+        [itemResizeObserver],
+    );
 
     const registerItem = useStableCallback((node: HTMLElement | null) => {
         if (node === null) {
@@ -847,8 +966,15 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         [keys, currentOptions, itemHeight, rerender, requestDirtyFlush],
     );
 
-    const scrollTop = Math.max(0, dimensions.scrollY - dimensions.containerOffset);
-    const { start: rangeStart, end: rangeEnd } = parseRange(scrollTop, windowHeight, overscan);
+    const scrollTop = Math.max(
+        0,
+        dimensions.scrollY - dimensions.containerOffset,
+    );
+    const { start: rangeStart, end: rangeEnd } = parseRange(
+        scrollTop,
+        windowHeight,
+        overscan,
+    );
     const positionedChildren: React.ReactElement[] = [];
 
     const push = (index: number, left: number, top: number) => {
@@ -877,7 +1003,9 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
         [MasonryDataAttributes.slot]: "masonry",
         role: "list",
         style: {
-            height: shouldShowFallback ? undefined : Math.ceil(positioner.tallestColumn()),
+            height: shouldShowFallback
+                ? undefined
+                : Math.ceil(positioner.tallestColumn()),
             position: "relative",
             width: "100%",
         },
@@ -891,13 +1019,18 @@ export function MasonryRoot<T>(componentProps: MasonryRootProps<T>): React.React
 
 export type MasonryItemState = {};
 
-export interface MasonryItemProps extends BaseUIComponentProps<"div", MasonryItemState> {}
+export interface MasonryItemProps extends BaseUIComponentProps<
+    "div",
+    MasonryItemState
+> {}
 
 /**
  * A single item of the masonry layout.
  * Renders a `<div>` element.
  */
-export function MasonryItem(componentProps: MasonryItemProps): React.ReactElement {
+export function MasonryItem(
+    componentProps: MasonryItemProps,
+): React.ReactElement {
     const { className, render, style, ...elementProps } = componentProps;
 
     const defaultProps: MasonryItemSlotProps = {
