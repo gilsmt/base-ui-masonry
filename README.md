@@ -2,7 +2,7 @@
 
 A responsive, highly optimized, unstyled masonry UI layout component. With virtualization, built for being used alongside [BaseUI](https://base-ui.com) in React 19 projects. Made to be highly portable.
 
-This component is meant to be vendored, not treated as a fixed npm dependency. Copy the file into your repository, read it, and change it to match your team's standards and goals.
+Copy the file into your repository, read it, and change it to match your team's standards and goals.
 
 ## Usage
 
@@ -157,4 +157,4 @@ Open to pull requests & suggestions.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE file](LICENSE) for details.
+Licensed under the MIT License - see the [LICENSE file](LICENSE) for details.
