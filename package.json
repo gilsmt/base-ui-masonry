@@ -7,10 +7,10 @@
     "sideEffects": false,
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/rortan134/base-ui-masonry.git"
+        "url": "git+https://github.com/gilsmt/base-ui-masonry.git"
     },
     "bugs": {
-        "url": "https://github.com/rortan134/base-ui-masonry/issues"
+        "url": "https://github.com/gilsmt/base-ui-masonry/issues"
     },
     "keywords": [
         "react",
