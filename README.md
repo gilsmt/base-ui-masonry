@@ -22,7 +22,7 @@ bun add @base-ui/react @base-ui/utils
 
 ### 2. Copy and paste the following code into your project
 
-[masonry.tsx](./src/masonry.tsx)
+[src/masonry.tsx](./src/masonry.tsx)
 
 ## Anatomy
 
@@ -58,7 +58,7 @@ The custom component must forward the `ref`, and spread all the received props o
 
 | Bundle                                                                   | Minified | Gzipped | Brotli  |
 | ------------------------------------------------------------------------ | -------- | ------- | ------- |
-| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.85 kB | 3.98 kB | 3.61 kB |
+| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.85 kB  | 3.98 kB | 3.61 kB |
 | `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.71 kB | 6.53 kB | 5.90 kB |
 
 Run `bun run size:update` to refresh.
