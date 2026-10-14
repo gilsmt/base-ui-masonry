@@ -56,7 +56,7 @@ async function updateReadmeTable(alone: BundleSizes, withDeps: BundleSizes) {
         }
         const lineIndex = matches[0];
         const line = lines[lineIndex];
-        const rowShape = / \| [\d.]+ kB \| [\d.]+ kB \| [\d.]+ kB \|$/;
+        const rowShape = / \| +[\d.]+ kB +\| +[\d.]+ kB +\| +[\d.]+ kB +\|$/;
         if (!rowShape.test(line)) {
             throw new Error(`README table row does not match the expected shape: ${line}`);
         }
