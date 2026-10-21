@@ -889,6 +889,17 @@ export function MasonryRoot<T>(
         requestFlush();
     });
 
+    const registerItem = useStableCallback((node: HTMLElement | null) => {
+        if (node === null) {
+            return;
+        }
+        itemResizeObserver?.observe(node);
+        return () => {
+            itemResizeObserver?.unobserve(node);
+            pendingMap.delete(node);
+        };
+    });
+
     const itemResizeObserver = useRefWithInit(() => {
         if (typeof ResizeObserver !== "function") {
             return null;
@@ -905,17 +916,6 @@ export function MasonryRoot<T>(
         () => () => itemResizeObserver?.disconnect(),
         [itemResizeObserver],
     );
-
-    const registerItem = useStableCallback((node: HTMLElement | null) => {
-        if (node === null) {
-            return;
-        }
-        itemResizeObserver?.observe(node);
-        return () => {
-            itemResizeObserver?.unobserve(node);
-            pendingMap.delete(node);
-        };
-    });
 
     useIsoLayoutEffect(
         function observeContainer() {
