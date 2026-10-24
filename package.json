@@ -35,10 +35,7 @@
         "probe": "bun run test/performance/positioner.probe.ts && bun run test/performance/inert-ratio.probe.ts && bun run test/performance/reflow-span.probe.ts && bun run test/performance/scaling.probe.ts && bun run test/performance/render-count.probe.tsx",
         "probe:timing": "echo 'timing is environment noise in CI (different machines); run mitata locally on a quiet machine — see test/performance/*.probe.ts headers'",
         "size": "bun run test/bundle-size/check.ts",
-        "size:update": "bun run test/bundle-size/check.ts --update",
-        "bench": "bun run probe",
-        "bench:timing": "bun run probe:timing",
-        "hooks:install": "git config core.hooksPath .githooks"
+        "size:update": "bun run test/bundle-size/check.ts --update"
     },
     "dependencies": {
         "@base-ui/react": "^1.9.0",
