@@ -58,10 +58,8 @@ The custom component must forward the `ref`, and spread all the received props o
 
 | Bundle                                                                   | Minified | Gzipped | Brotli  |
 | ------------------------------------------------------------------------ | -------- | ------- | ------- |
-| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.85 kB  | 3.98 kB | 3.61 kB |
-| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.71 kB | 6.53 kB | 5.90 kB |
-
-Run `bun run size:update` to refresh.
+| `masonry.tsx` alone (`@base-ui/*` external) — standalone copy/paste cost | 9.98 kB  | 4.04 kB | 3.65 kB |
+| `masonry.tsx` + tree-shaken `@base-ui` deps                              | 16.83 kB | 6.60 kB | 5.95 kB |
 
 ## API reference
 
@@ -124,18 +122,6 @@ Renders a `<div>` element.
 
 Masonry renders a `list` of `listitem` slots by default. Override `role` on either part when the content needs different semantics (for example `role="feed"` / `role="article"`).
 
-## Server-side rendering
-
-`MasonryRoot` is a client component that server-renders safely.
-
-### Known limitations
-
-- Without JavaScript there are no measurements, so the server HTML holds the `fallback`
-  prop when `items` is non-empty, or an empty box otherwise.
-  Only the rendered window is in the HTML (windowing).
-- Replacing the estimate with measured heights can cause minor layout shift;
-  realistic `itemHeight`/`gap` values minimize it.
-
 ## Scope & trade-offs
 
 Affordances that peer virtualizers (react-window, TanStack Virtual, react-virtuoso) ship, which
@@ -149,7 +135,7 @@ this component deliberately lacks. Listed so you can decide whether they matter 
 - **No enter/exit animation support.** Filtering, insertion, and removal re-layout immediately, and off-window items unmount by design. CSS `transition` on `transform` and layout-animation libraries fight measurement. For small animated lists, use `overscan={Infinity}` to disable windowing first.
 - **`columnWidth` is a _preferred_ width** used to derive the column count. Items will always try to stretch to fill their (equal-width) columns for consistency.
 - **Items need a stable identity.** Each item must have a string or number `id` property (or supply `getItemKey`). The identity keeps measured heights attached to their item across reorders, insertions, and removals; without it, a reorder discards the measured heights and the layout is re-measured. The `key` you set on `MasonryItem` in the render function is for React reconciliation only — the `id`/`getItemKey` identity is what the layout uses.
-- The rendered window extends further below the viewport than above it: scrolling down races the unmeasured frontier (render + measurement lag), while everything above is already placed and only needs render-lag cover.
+- **Items keep their column.** A reorder or an insertion does not move the items that are already placed, and a measurement never moves an item between columns: it only re-stacks the column it landed in. The grid is re-balanced in two cases only — the column count changed, or a removal left a column empty (which would show a hole).
 
 ## Contributing
 
